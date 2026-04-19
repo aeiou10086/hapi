@@ -390,7 +390,7 @@ export function SessionChat(props: {
                     <HappyComposer
                         key={props.session.id}
                         sessionId={props.session.id}
-                        disabled={props.isSending}
+                        disabled={false}
                         permissionMode={props.session.permissionMode}
                         collaborationMode={codexCollaborationModeSupported ? props.session.collaborationMode : undefined}
                         model={props.session.model}
@@ -425,6 +425,7 @@ export function SessionChat(props: {
                         voiceMicMuted={voice?.micMuted}
                         onVoiceToggle={voice ? handleVoiceToggle : undefined}
                         onVoiceMicToggle={voice ? handleVoiceMicToggle : undefined}
+                        onDirectSend={(text) => props.onSend(text)}
                     />
                 </div>
             </AssistantRuntimeProvider>

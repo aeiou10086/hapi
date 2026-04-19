@@ -25,6 +25,7 @@ import {
     type RpcUploadFileResponse
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
+import { backfillFromTranscript } from './backfill'
 
 export type { Session, SyncEvent } from '@hapi/protocol/types'
 export type { Machine } from './machineCache'
@@ -43,6 +44,7 @@ export type ResumeSessionResult =
     | { type: 'error'; message: string; code: 'session_not_found' | 'access_denied' | 'no_machine_online' | 'resume_unavailable' | 'resume_failed' }
 
 export class SyncEngine {
+    private readonly store: Store
     private readonly eventPublisher: EventPublisher
     private readonly sessionCache: SessionCache
     private readonly machineCache: MachineCache
@@ -56,6 +58,7 @@ export class SyncEngine {
         rpcRegistry: RpcRegistry,
         sseManager: SSEManager
     ) {
+        this.store = store
         this.eventPublisher = new EventPublisher(sseManager, (event) => this.resolveNamespace(event))
         this.sessionCache = new SessionCache(store, this.eventPublisher)
         this.machineCache = new MachineCache(store, this.eventPublisher)
@@ -154,11 +157,39 @@ export class SyncEngine {
             hasMore: boolean
         }
     } {
+        // Attempt backfill before returning messages
+        this.backfillSession(sessionId)
         return this.messageService.getMessagesPage(sessionId, options)
     }
 
     getMessagesAfter(sessionId: string, options: { afterSeq: number; limit: number }): DecryptedMessage[] {
         return this.messageService.getMessagesAfter(sessionId, options)
+    }
+
+    /**
+     * Backfill missing messages from the Claude JSONL transcript file.
+     * Called automatically before returning messages. Has a 30s cooldown per session.
+     */
+    private backfillSession(sessionId: string): void {
+        try {
+            const session = this.getSession(sessionId)
+            if (!session?.metadata) return
+
+            const claudeSessionId = (session.metadata as Record<string, unknown>).claudeSessionId as string | undefined
+            if (!claudeSessionId) return
+
+            const count = backfillFromTranscript(this.store, sessionId, claudeSessionId)
+            if (count > 0) {
+                // Notify SSE clients about new messages
+                this.eventPublisher.emit({
+                    type: 'session-updated',
+                    sessionId,
+                    data: { sid: sessionId },
+                })
+            }
+        } catch {
+            // Backfill is best-effort; don't break message retrieval
+        }
     }
 
     handleRealtimeEvent(event: SyncEvent): void {

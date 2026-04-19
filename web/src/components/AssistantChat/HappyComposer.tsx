@@ -71,6 +71,7 @@ export function HappyComposer(props: {
     voiceMicMuted?: boolean
     onVoiceToggle?: () => void
     onVoiceMicToggle?: () => void
+    onDirectSend?: (text: string) => void
 }) {
     const { t } = useTranslation()
     const {
@@ -118,9 +119,15 @@ export function HappyComposer(props: {
     const threadIsRunning = useAssistantState(({ thread }) => thread.isRunning)
     const threadIsDisabled = useAssistantState(({ thread }) => thread.isDisabled)
 
-    const controlsDisabled = disabled || (!active && !allowSendWhenInactive) || threadIsDisabled
+    const [inputState, setInputState] = useState<TextInputState>({
+        text: '',
+        selection: { start: 0, end: 0 }
+    })
+
+    const controlsDisabled = !active && !allowSendWhenInactive
     const trimmed = composerText.trim()
-    const hasText = trimmed.length > 0
+    const inputTrimmed = inputState.text.trim()
+    const hasText = trimmed.length > 0 || inputTrimmed.length > 0
     const hasAttachments = attachments.length > 0
     const attachmentsReady = !hasAttachments || attachments.every((attachment) => {
         if (attachment.status.type === 'complete') {
@@ -133,11 +140,6 @@ export function HappyComposer(props: {
         return typeof path === 'string' && path.length > 0
     })
     const canSend = (hasText || hasAttachments) && attachmentsReady && !controlsDisabled
-
-    const [inputState, setInputState] = useState<TextInputState>({
-        text: '',
-        selection: { start: 0, end: 0 }
-    })
     const [showSettings, setShowSettings] = useState(false)
     const [isAborting, setIsAborting] = useState(false)
     const [isSwitching, setIsSwitching] = useState(false)
@@ -491,8 +493,13 @@ export function HappyComposer(props: {
     const voiceEnabled = Boolean(onVoiceToggle)
 
     const handleSend = useCallback(() => {
-        api.composer().send()
-    }, [api])
+        if (threadIsRunning && props.onDirectSend && inputState.text.trim()) {
+            props.onDirectSend(inputState.text.trim())
+            setInputState({ text: '', selection: { start: 0, end: 0 } })
+        } else {
+            api.composer().send()
+        }
+    }, [api, threadIsRunning, props.onDirectSend, inputState.text])
 
     const overlays = useMemo(() => {
         if (showSettings && (showCollaborationSettings || showPermissionSettings || showModelSettings || showModelReasoningEffortSettings || showEffortSettings)) {
