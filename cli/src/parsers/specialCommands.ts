@@ -11,8 +11,12 @@ export interface ClearCommandResult {
     isClear: boolean;
 }
 
+export interface CostCommandResult {
+    isCost: boolean;
+}
+
 export interface SpecialCommandResult {
-    type: 'compact' | 'clear' | null;
+    type: 'compact' | 'clear' | 'cost' | null;
     originalMessage?: string;
 }
 
@@ -49,9 +53,21 @@ export function parseCompact(message: string): CompactCommandResult {
  */
 export function parseClear(message: string): ClearCommandResult {
     const trimmed = message.trim();
-    
+
     return {
         isClear: trimmed === '/clear'
+    };
+}
+
+/**
+ * Parse /cost command
+ * Only matches exactly "/cost"
+ */
+export function parseCost(message: string): CostCommandResult {
+    const trimmed = message.trim();
+
+    return {
+        isCost: trimmed === '/cost'
     };
 }
 
@@ -67,14 +83,21 @@ export function parseSpecialCommand(message: string): SpecialCommandResult {
             originalMessage: compactResult.originalMessage
         };
     }
-    
+
     const clearResult = parseClear(message);
     if (clearResult.isClear) {
         return {
             type: 'clear'
         };
     }
-    
+
+    const costResult = parseCost(message);
+    if (costResult.isCost) {
+        return {
+            type: 'cost'
+        };
+    }
+
     return {
         type: null
     };

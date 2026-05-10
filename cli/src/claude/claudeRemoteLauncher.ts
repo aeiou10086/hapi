@@ -4,7 +4,7 @@ import { RemoteModeDisplay } from "@/ui/ink/RemoteModeDisplay";
 import { claudeRemote } from "./claudeRemote";
 import { PermissionHandler } from "./utils/permissionHandler";
 import { Future } from "@/utils/future";
-import { SDKAssistantMessage, SDKMessage, SDKUserMessage } from "./sdk";
+import { SDKAssistantMessage, SDKMessage, SDKResultMessage, SDKUserMessage } from "./sdk";
 import { formatClaudeMessageForInk } from "@/ui/messageFormatterInk";
 import { logger } from "@/ui/logger";
 import { SDKToLogConverter } from "./utils/sdkToLogConverter";
@@ -117,9 +117,34 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
         let planModeToolCalls = new Set<string>();
         let ongoingToolCalls = new Map<string, { parentToolCallId: string | null }>();
 
+        // Session-wide cost stats accumulated across every claudeRemote invocation
+        // (each turn's `result` SDK message contributes one increment). Used by /cost.
+        const sessionCost = {
+            totalCostUsd: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            durationApiMs: 0,
+            durationWallMs: 0,
+            turnCount: 0
+        };
+
         function onMessage(message: SDKMessage) {
             formatClaudeMessageForInk(message, messageBuffer);
             permissionHandler.onMessage(message);
+
+            if (message.type === 'result') {
+                const r = message as SDKResultMessage;
+                sessionCost.totalCostUsd += r.total_cost_usd ?? 0;
+                sessionCost.inputTokens += r.usage?.input_tokens ?? 0;
+                sessionCost.outputTokens += r.usage?.output_tokens ?? 0;
+                sessionCost.cacheReadTokens += r.usage?.cache_read_input_tokens ?? 0;
+                sessionCost.cacheCreationTokens += r.usage?.cache_creation_input_tokens ?? 0;
+                sessionCost.durationApiMs += r.duration_api_ms ?? 0;
+                sessionCost.durationWallMs += r.duration_ms ?? 0;
+                sessionCost.turnCount += 1;
+            }
 
             if (message.type === 'assistant') {
                 let umessage = message as SDKAssistantMessage;
@@ -347,6 +372,10 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                             logger.debug('[remote]: Session reset');
                             session.clearSessionId();
                         },
+                        onResolvedModel: (model: string) => {
+                            session.client.updateMetadata((m) => ({ ...m, resolvedModel: model }));
+                        },
+                        getSessionCost: () => sessionCost,
                         onReady: () => {
                             logger.debug(
                                 `[claudeRemoteLauncher][async-debug] onReady callback ` +

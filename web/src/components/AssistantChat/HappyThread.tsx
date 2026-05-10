@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ThreadPrimitive } from '@assistant-ui/react'
+import { ThreadPrimitive, useThreadViewportStore } from '@assistant-ui/react'
 import type { ApiClient } from '@/api/client'
 import type { SessionMetadataSummary } from '@/types/api'
 import { HappyChatProvider } from '@/components/AssistantChat/context'
@@ -49,6 +49,22 @@ function MessageSkeleton() {
     )
 }
 
+function ViewportStoreCapture(props: {
+    storeRef: React.MutableRefObject<{ setState: (s: { isAtBottom: boolean }) => void } | null>
+}) {
+    const store = useThreadViewportStore()
+    useEffect(() => {
+        // The library exposes a ReadonlyStore type but the underlying object is
+        // a Zustand store with setState — cast to access it. (Library does the
+        // same internally via writableStore() in useThreadViewportAutoScroll.js.)
+        props.storeRef.current = store as unknown as { setState: (s: { isAtBottom: boolean }) => void }
+        return () => {
+            props.storeRef.current = null
+        }
+    }, [store, props.storeRef])
+    return null
+}
+
 const THREAD_MESSAGE_COMPONENTS = {
     UserMessage: HappyUserMessage,
     AssistantMessage: HappyAssistantMessage,
@@ -91,6 +107,13 @@ export function HappyThread(props: {
     const onAtBottomChangeRef = useRef(props.onAtBottomChange)
     const onFlushPendingRef = useRef(props.onFlushPending)
     const forceScrollTokenRef = useRef(props.forceScrollToken)
+    // The library's threadViewportStore — captured by ViewportStoreCapture
+    // (a no-op child rendered inside ThreadPrimitive.Viewport). We mirror our
+    // "user has scrolled up" decision into the library's `isAtBottom` so its
+    // resize callback (`useThreadViewportAutoScroll.js`) doesn't re-pin to
+    // bottom when a content reflow races a wheel event — the trigger we kept
+    // hitting after Abort messages.
+    const viewportStoreRef = useRef<{ setState: (s: { isAtBottom: boolean }) => void } | null>(null)
 
     // Smart scroll state: autoScroll enabled when user is near bottom
     const [autoScrollEnabled, setAutoScrollEnabled] = useState(true)
@@ -122,15 +145,27 @@ export function HappyThread(props: {
         if (!viewport) return
 
         const THRESHOLD_PX = 120
+        let lastScrollTop = viewport.scrollTop
 
         const handleScroll = () => {
             const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
             const isNearBottom = distanceFromBottom < THRESHOLD_PX
+            const scrolledUp = viewport.scrollTop < lastScrollTop
+            lastScrollTop = viewport.scrollTop
 
             if (isNearBottom) {
                 if (!autoScrollEnabledRef.current) setAutoScrollEnabled(true)
             } else if (autoScrollEnabledRef.current) {
                 setAutoScrollEnabled(false)
+            }
+
+            // Mirror to the library's isAtBottom *immediately* on any user
+            // upward scroll (even tiny) so its resize callback won't re-pin
+            // before its own scroll listener catches up. Avoids the post-Abort
+            // race where two reflows fire (remove-thinking + add-message)
+            // around the user's wheel event.
+            if (scrolledUp && distanceFromBottom > 1 && viewportStoreRef.current) {
+                viewportStoreRef.current.setState({ isAtBottom: false })
             }
 
             if (isNearBottom !== atBottomRef.current) {
@@ -278,8 +313,15 @@ export function HappyThread(props: {
             onRetryMessage: props.onRetryMessage
         }}>
             <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col relative">
-                <ThreadPrimitive.Viewport asChild autoScroll={autoScrollEnabled}>
+                <ThreadPrimitive.Viewport
+                    asChild
+                    autoScroll={autoScrollEnabled}
+                    scrollToBottomOnRunStart={false}
+                    scrollToBottomOnInitialize={false}
+                    scrollToBottomOnThreadSwitch={false}
+                >
                     <div ref={viewportRef} className="app-scroll-y min-h-0 flex-1 overflow-x-hidden">
+                        <ViewportStoreCapture storeRef={viewportStoreRef} />
                         <div className="mx-auto w-full max-w-content min-w-0 p-3">
                             <div ref={topSentinelRef} className="h-px w-full" aria-hidden="true" />
                             {showSkeleton ? (

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCompact, parseClear, parseSpecialCommand } from './specialCommands';
+import { parseCompact, parseClear, parseCost, parseSpecialCommand } from './specialCommands';
 
 describe('parseCompact', () => {
     it('should parse /compact command with argument', () => {
@@ -49,6 +49,25 @@ describe('parseClear', () => {
     });
 });
 
+describe('parseCost', () => {
+    it('should parse /cost command exactly', () => {
+        expect(parseCost('/cost').isCost).toBe(true);
+    });
+
+    it('should parse /cost command with whitespace', () => {
+        expect(parseCost('  /cost  ').isCost).toBe(true);
+    });
+
+    it('should not parse /cost with arguments', () => {
+        expect(parseCost('/cost detail').isCost).toBe(false);
+    });
+
+    it('should not parse partial matches', () => {
+        expect(parseCost('/costly').isCost).toBe(false);
+        expect(parseCost('please /cost').isCost).toBe(false);
+    });
+});
+
 describe('parseSpecialCommand', () => {
     it('should detect compact command', () => {
         const result = parseSpecialCommand('/compact optimize');
@@ -72,10 +91,13 @@ describe('parseSpecialCommand', () => {
         // Test with extra whitespace
         expect(parseSpecialCommand('  /compact test  ').type).toBe('compact');
         expect(parseSpecialCommand('  /clear  ').type).toBe('clear');
-        
+        expect(parseSpecialCommand('  /cost  ').type).toBe('cost');
+
         // Test partial matches should not trigger
         expect(parseSpecialCommand('some /compact text').type).toBeNull();
         expect(parseSpecialCommand('/compactor').type).toBeNull();
         expect(parseSpecialCommand('/clearing').type).toBeNull();
+        expect(parseSpecialCommand('/costly').type).toBeNull();
+        expect(parseSpecialCommand('/cost details').type).toBeNull();
     });
 });

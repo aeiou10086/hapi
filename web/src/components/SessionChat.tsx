@@ -394,6 +394,7 @@ export function SessionChat(props: {
                         permissionMode={props.session.permissionMode}
                         collaborationMode={codexCollaborationModeSupported ? props.session.collaborationMode : undefined}
                         model={props.session.model}
+                        resolvedModel={props.session.metadata?.resolvedModel ?? null}
                         modelReasoningEffort={agentFlavor === 'codex' ? props.session.modelReasoningEffort : undefined}
                         effort={props.session.effort}
                         agentFlavor={agentFlavor}

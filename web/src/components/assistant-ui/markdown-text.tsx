@@ -7,6 +7,7 @@ import {
 } from '@assistant-ui/react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
+import remarkBreaks from 'remark-breaks'
 import rehypeKatex from 'rehype-katex'
 import remarkDisableIndentedCode from '@/lib/remark-disable-indented-code'
 import remarkStripCjkAutolink from '@/lib/remark-strip-cjk-autolink'
@@ -17,7 +18,11 @@ import { CopyIcon, CheckIcon } from '@/components/icons'
 
 import type { MarkdownTextPrimitiveProps } from '@assistant-ui/react-markdown'
 
-export const MARKDOWN_PLUGINS = [remarkGfm, remarkStripCjkAutolink, remarkMath, remarkDisableIndentedCode] satisfies NonNullable<MarkdownTextPrimitiveProps['remarkPlugins']>
+// remarkBreaks turns single \n into a hard line break (<br>). Without it, the
+// composer textarea's Shift+Enter / multi-line input gets collapsed when the
+// message is rendered as Markdown. Affects both user and assistant messages —
+// both benefit from preserving newlines that the sender visibly typed.
+export const MARKDOWN_PLUGINS = [remarkGfm, remarkStripCjkAutolink, remarkMath, remarkDisableIndentedCode, remarkBreaks] satisfies NonNullable<MarkdownTextPrimitiveProps['remarkPlugins']>
 export const MARKDOWN_REHYPE_PLUGINS = [rehypeKatex] satisfies NonNullable<MarkdownTextPrimitiveProps['rehypePlugins']>
 
 function CodeHeader(props: CodeHeaderProps) {

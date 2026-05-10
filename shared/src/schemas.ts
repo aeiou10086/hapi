@@ -34,6 +34,11 @@ export const MetadataSchema = z.object({
     cursorSessionId: z.string().optional(),
     tools: z.array(z.string()).optional(),
     slashCommands: z.array(z.string()).optional(),
+    // Model name as resolved by the underlying agent binary (from system/init).
+    // When the user picks "auto" the user-facing model is null but the binary
+    // resolves it to a concrete name; surface it so the web UI can compute the
+    // correct context-window budget for "auto" sessions.
+    resolvedModel: z.string().optional(),
     homeDir: z.string().optional(),
     happyHomeDir: z.string().optional(),
     happyLibDir: z.string().optional(),

@@ -46,6 +46,7 @@ export function HappyComposer(props: {
     permissionMode?: PermissionMode
     collaborationMode?: CodexCollaborationMode
     model?: string | null
+    resolvedModel?: string | null
     modelReasoningEffort?: string | null
     effort?: string | null
     active?: boolean
@@ -80,6 +81,7 @@ export function HappyComposer(props: {
         permissionMode: rawPermissionMode,
         collaborationMode: rawCollaborationMode,
         model: rawModel,
+        resolvedModel,
         modelReasoningEffort: rawModelReasoningEffort,
         effort: rawEffort,
         active = true,
@@ -768,6 +770,7 @@ export function HappyComposer(props: {
                         backgroundTaskCount={backgroundTaskCount}
                         contextSize={contextSize}
                         model={model}
+                        resolvedModel={resolvedModel}
                         permissionMode={permissionMode}
                         collaborationMode={collaborationMode}
                         agentFlavor={agentFlavor}

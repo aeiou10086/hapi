@@ -35,7 +35,18 @@ export async function claudeRemote(opts: {
     onThinkingChange?: (thinking: boolean) => void,
     onMessage: (message: SDKMessage) => void,
     onCompletionEvent?: (message: string) => void,
-    onSessionReset?: () => void
+    onSessionReset?: () => void,
+    onResolvedModel?: (model: string) => void,
+    getSessionCost?: () => {
+        totalCostUsd: number,
+        inputTokens: number,
+        outputTokens: number,
+        cacheReadTokens: number,
+        cacheCreationTokens: number,
+        durationApiMs: number,
+        durationWallMs: number,
+        turnCount: number
+    }
 }) {
     const debugPrefix = '[claudeRemote][async-debug]';
 
@@ -106,6 +117,37 @@ export async function claudeRemote(opts: {
         }
         if (opts.onSessionReset) {
             opts.onSessionReset();
+        }
+        return;
+    }
+
+    // Handle /cost command — emit accumulated session stats as a session event,
+    // never invoke the SDK. The accumulator lives in the launcher (across
+    // claudeRemote invocations); we just read it via opts.getSessionCost.
+    if (specialCommand.type === 'cost') {
+        if (opts.onCompletionEvent) {
+            const stats = opts.getSessionCost?.();
+            if (!stats || stats.turnCount === 0) {
+                opts.onCompletionEvent('No cost yet — no turns completed in this session.');
+            } else {
+                const fmtTokens = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+                const fmtDuration = (ms: number) => {
+                    if (ms < 1000) return `${ms}ms`;
+                    if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+                    const m = Math.floor(ms / 60_000);
+                    const s = Math.floor((ms % 60_000) / 1000);
+                    return `${m}m${s}s`;
+                };
+                opts.onCompletionEvent(
+                    [
+                        `Session cost:  ${stats.totalCostUsd.toFixed(4)} USD`,
+                        `Turns:         ${stats.turnCount}`,
+                        `Tokens:        ${fmtTokens(stats.inputTokens)} in / ${fmtTokens(stats.outputTokens)} out`,
+                        `Cache:         ${fmtTokens(stats.cacheReadTokens)} read / ${fmtTokens(stats.cacheCreationTokens)} new`,
+                        `Duration:      ${fmtDuration(stats.durationApiMs)} API / ${fmtDuration(stats.durationWallMs)} wall`
+                    ].join('\n')
+                );
+            }
         }
         return;
     }
@@ -242,6 +284,12 @@ export async function claudeRemote(opts: {
                 updateThinking(true);
 
                 const systemInit = message as SDKSystemMessage;
+
+                // Surface the binary-resolved model name (e.g. when user picks
+                // "auto", binary still reports the concrete model in init).
+                if (systemInit.model) {
+                    opts.onResolvedModel?.(systemInit.model);
+                }
 
                 // Session id is still in memory, wait until session file is written to disk
                 // Start a watcher for to detect the session id

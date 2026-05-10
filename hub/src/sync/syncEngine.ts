@@ -25,7 +25,7 @@ import {
     type RpcUploadFileResponse
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
-import { backfillFromTranscript } from './backfill'
+import { TranscriptWatcher } from './transcriptWatcher'
 
 export type { Session, SyncEvent } from '@hapi/protocol/types'
 export type { Machine } from './machineCache'
@@ -50,6 +50,7 @@ export class SyncEngine {
     private readonly machineCache: MachineCache
     private readonly messageService: MessageService
     private readonly rpcGateway: RpcGateway
+    private readonly transcriptWatcher: TranscriptWatcher
     private inactivityTimer: NodeJS.Timeout | null = null
 
     constructor(
@@ -64,6 +65,7 @@ export class SyncEngine {
         this.machineCache = new MachineCache(store, this.eventPublisher)
         this.messageService = new MessageService(store, io, this.eventPublisher)
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
+        this.transcriptWatcher = new TranscriptWatcher(store, this.eventPublisher)
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
     }
@@ -73,6 +75,7 @@ export class SyncEngine {
             clearInterval(this.inactivityTimer)
             this.inactivityTimer = null
         }
+        this.transcriptWatcher.stopAll()
     }
 
     subscribe(listener: SyncEventListener): () => void {
@@ -157,8 +160,6 @@ export class SyncEngine {
             hasMore: boolean
         }
     } {
-        // Attempt backfill before returning messages
-        this.backfillSession(sessionId)
         return this.messageService.getMessagesPage(sessionId, options)
     }
 
@@ -166,43 +167,21 @@ export class SyncEngine {
         return this.messageService.getMessagesAfter(sessionId, options)
     }
 
-    /**
-     * Backfill missing messages from the Claude JSONL transcript file.
-     * Called automatically before returning messages. Has a 30s cooldown per session.
-     */
-    private backfillSession(sessionId: string): void {
-        try {
-            const session = this.getSession(sessionId)
-            if (!session?.metadata) return
-
-            const claudeSessionId = (session.metadata as Record<string, unknown>).claudeSessionId as string | undefined
-            if (!claudeSessionId) return
-
-            const count = backfillFromTranscript(this.store, sessionId, claudeSessionId)
-            if (count > 0) {
-                // Notify SSE clients about new messages
-                this.eventPublisher.emit({
-                    type: 'session-updated',
-                    sessionId,
-                    data: { sid: sessionId },
-                })
-            }
-        } catch {
-            // Backfill is best-effort; don't break message retrieval
-        }
-    }
-
     handleRealtimeEvent(event: SyncEvent): void {
         if (event.type === 'session-updated' && event.sessionId) {
-            // Snapshot agent session IDs before refresh — safe because JS is single-threaded
-            // and refreshSession replaces the Map entry with a new object.
             const before = this.sessionCache.getSession(event.sessionId)
             this.sessionCache.refreshSession(event.sessionId)
             const after = this.sessionCache.getSession(event.sessionId)
             if (after?.metadata && !this.hasSameAgentSessionIds(before?.metadata ?? null, after.metadata)) {
                 void this.sessionCache.deduplicateByAgentSessionId(event.sessionId).catch(() => {
-                    // best-effort: dedup failure is harmless, web-side safety net hides remaining duplicates
                 })
+            }
+            // Start transcript watcher if session has claudeSessionId
+            if (after?.active) {
+                const claudeSessionId = (after.metadata as Record<string, unknown> | null)?.claudeSessionId as string | undefined
+                if (claudeSessionId && !this.transcriptWatcher.isWatching(event.sessionId)) {
+                    this.transcriptWatcher.watchSession(event.sessionId, claudeSessionId)
+                }
             }
             return
         }
@@ -267,6 +246,21 @@ export class SyncEngine {
     private reloadAll(): void {
         this.sessionCache.reloadAll()
         this.machineCache.reloadAll()
+        this.startWatchersForActiveSessions()
+    }
+
+    /**
+     * Start transcript watchers for all sessions that have a claudeSessionId.
+     */
+    private startWatchersForActiveSessions(): void {
+        const sessions = this.sessionCache.getSessions()
+        for (const session of sessions) {
+            if (!session.active) continue
+            const claudeSessionId = (session.metadata as Record<string, unknown> | null)?.claudeSessionId as string | undefined
+            if (claudeSessionId && !this.transcriptWatcher.isWatching(session.id)) {
+                this.transcriptWatcher.watchSession(session.id, claudeSessionId)
+            }
+        }
     }
 
     getOrCreateSession(

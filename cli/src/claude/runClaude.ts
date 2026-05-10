@@ -282,6 +282,24 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
             return;
         }
 
+        if (specialCommand.type === 'cost') {
+            logger.debug('[start] Detected /cost command');
+            const enhancedMode: EnhancedMode = {
+                permissionMode: messagePermissionMode ?? 'default',
+                model: messageModel,
+                effort: messageEffort,
+                fallbackModel: messageFallbackModel,
+                customSystemPrompt: messageCustomSystemPrompt,
+                appendSystemPrompt: messageAppendSystemPrompt,
+                allowedTools: messageAllowedTools,
+                disallowedTools: messageDisallowedTools
+            };
+            const commandText = specialCommand.originalMessage || message.content.text;
+            messageQueue.pushIsolateAndClear(commandText, enhancedMode);
+            logger.debugLargeJson('[start] /cost command pushed to queue:', message);
+            return;
+        }
+
         // Push with resolved permission mode, model, system prompts, and tools
         const enhancedMode: EnhancedMode = {
             permissionMode: messagePermissionMode ?? 'default',

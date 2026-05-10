@@ -123,6 +123,7 @@ export function StatusBar(props: {
     backgroundTaskCount?: number
     contextSize?: number
     model?: string | null
+    resolvedModel?: string | null
     permissionMode?: PermissionMode
     collaborationMode?: CodexCollaborationMode
     agentFlavor?: string | null
@@ -137,11 +138,11 @@ export function StatusBar(props: {
     const contextWarning = useMemo(
         () => {
             if (props.contextSize === undefined) return null
-            const maxContextSize = getContextBudgetTokens(props.model, props.agentFlavor)
+            const maxContextSize = getContextBudgetTokens(props.model, props.agentFlavor, props.resolvedModel)
             if (!maxContextSize) return null
             return getContextWarning(props.contextSize, maxContextSize, t)
         },
-        [props.contextSize, props.model, props.agentFlavor, t]
+        [props.contextSize, props.model, props.resolvedModel, props.agentFlavor, t]
     )
 
     const permissionMode = props.permissionMode
