@@ -1,4 +1,6 @@
 import type { InfiniteData } from '@tanstack/react-query'
+import { AGENT_MESSAGE_PAYLOAD_TYPE, isObject } from '@hapi/protocol'
+import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { DecryptedMessage, MessagesResponse } from '@/types/api'
 
 export function makeClientSideId(prefix: string): string {
@@ -34,23 +36,97 @@ function compareMessages(a: DecryptedMessage, b: DecryptedMessage): number {
     return a.id.localeCompare(b.id)
 }
 
-export function mergeMessages(existing: DecryptedMessage[], incoming: DecryptedMessage[]): DecryptedMessage[] {
-    if (existing.length === 0) {
-        return [...incoming].sort(compareMessages)
-    }
-    if (incoming.length === 0) {
-        return [...existing].sort(compareMessages)
+function getString(value: unknown): string | null {
+    return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function getAgentMessageIdentity(msg: DecryptedMessage): string | null {
+    if (msg.localId) {
+        return `local:${msg.localId}`
     }
 
+    const record = unwrapRoleWrappedRecordEnvelope(msg.content)
+    if (!record || record.role !== 'agent' || !isObject(record.content)) {
+        return null
+    }
+
+    const content = record.content
+    if (content.type === 'event') {
+        const id = getString(content.id)
+        return id ? `agent-event:${id}` : null
+    }
+
+    const data = isObject(content.data) ? content.data : null
+    if (!data) {
+        return null
+    }
+
+    if (content.type === 'output') {
+        if (data.type === 'assistant' && isObject(data.message)) {
+            const messageId = getString(data.message.id)
+            if (messageId) {
+                return `agent-output-message:${messageId}`
+            }
+        }
+
+        const uuid = getString(data.uuid)
+        if (uuid) {
+            return `agent-output:${uuid}`
+        }
+
+        if (data.type === 'summary') {
+            const leafUuid = getString(data.leafUuid)
+            const summary = getString(data.summary)
+            if (leafUuid && summary) {
+                return `agent-summary:${leafUuid}:${summary}`
+            }
+        }
+        return null
+    }
+
+    if (content.type === AGENT_MESSAGE_PAYLOAD_TYPE) {
+        const type = getString(data.type)
+        const id = getString(data.id)
+        if (type && id) {
+            return `agent-generic:${type}:${id}`
+        }
+
+        if (type === 'tool-call') {
+            const callId = getString(data.callId)
+            return callId ? `agent-generic:tool-call:${callId}` : null
+        }
+
+        if (type === 'tool-call-result') {
+            const callId = getString(data.callId)
+            return callId ? `agent-generic:tool-call-result:${callId}` : null
+        }
+    }
+
+    return null
+}
+
+function upsertByMessageIdentity(messages: DecryptedMessage[]): DecryptedMessage[] {
     const byId = new Map<string, DecryptedMessage>()
-    for (const msg of existing) {
+    const idByIdentity = new Map<string, string>()
+
+    for (const msg of messages) {
+        const identity = getAgentMessageIdentity(msg)
+        const existingId = identity ? idByIdentity.get(identity) : undefined
+        if (existingId && existingId !== msg.id) {
+            byId.delete(existingId)
+        }
+
         byId.set(msg.id, msg)
-    }
-    for (const msg of incoming) {
-        byId.set(msg.id, msg)
+        if (identity) {
+            idByIdentity.set(identity, msg.id)
+        }
     }
 
-    let merged = Array.from(byId.values())
+    return Array.from(byId.values()).sort(compareMessages)
+}
+
+export function mergeMessages(existing: DecryptedMessage[], incoming: DecryptedMessage[]): DecryptedMessage[] {
+    let merged = upsertByMessageIdentity([...existing, ...incoming])
 
     const incomingStoredLocalIds = new Set<string>()
     for (const msg of incoming) {

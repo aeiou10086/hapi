@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { logger } from '@/ui/logger';
 import { killProcessByChildProcess } from '@/utils/process';
+import { withInteractiveShellEnvFallback } from '@/utils/shellEnv';
 import type {
     InitializeParams,
     InitializeResponse,
@@ -11,7 +12,15 @@ import type {
     TurnStartParams,
     TurnStartResponse,
     TurnInterruptParams,
-    TurnInterruptResponse
+    TurnInterruptResponse,
+    ThreadCompactStartParams,
+    ThreadCompactStartResponse,
+    ReviewStartParams,
+    ReviewStartResponse,
+    ThreadRollbackParams,
+    ThreadRollbackResponse,
+    GitDiffToRemoteParams,
+    GitDiffToRemoteResponse
 } from './appServerTypes';
 
 type JsonRpcLiteRequest = {
@@ -74,11 +83,14 @@ export class CodexAppServerClient {
         }
 
         this.process = spawn('codex', ['app-server'], {
-            env: Object.keys(process.env).reduce((acc, key) => {
-                const value = process.env[key];
-                if (typeof value === 'string') acc[key] = value;
-                return acc;
-            }, {} as Record<string, string>),
+            env: (() => {
+                const env = withInteractiveShellEnvFallback(process.env);
+                return Object.keys(env).reduce((acc, key) => {
+                    const value = env[key];
+                    if (typeof value === 'string') acc[key] = value;
+                    return acc;
+                }, {} as Record<string, string>);
+            })(),
             stdio: ['pipe', 'pipe', 'pipe'],
             shell: process.platform === 'win32'
         });
@@ -162,6 +174,36 @@ export class CodexAppServerClient {
             timeoutMs: 30_000
         });
         return response as TurnInterruptResponse;
+    }
+
+    async compactThread(params: ThreadCompactStartParams, options?: { signal?: AbortSignal }): Promise<ThreadCompactStartResponse> {
+        const response = await this.sendRequest('thread/compact/start', params, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as ThreadCompactStartResponse;
+    }
+
+    async startReview(params: ReviewStartParams, options?: { signal?: AbortSignal }): Promise<ReviewStartResponse> {
+        const response = await this.sendRequest('review/start', params, {
+            signal: options?.signal,
+            timeoutMs: CodexAppServerClient.DEFAULT_TIMEOUT_MS
+        });
+        return response as ReviewStartResponse;
+    }
+
+    async rollbackThread(params: ThreadRollbackParams): Promise<ThreadRollbackResponse> {
+        const response = await this.sendRequest('thread/rollback', params, {
+            timeoutMs: 30_000
+        });
+        return response as ThreadRollbackResponse;
+    }
+
+    async gitDiffToRemote(params: GitDiffToRemoteParams): Promise<GitDiffToRemoteResponse> {
+        const response = await this.sendRequest('gitDiffToRemote', params, {
+            timeoutMs: 30_000
+        });
+        return response as GitDiffToRemoteResponse;
     }
 
     async disconnect(): Promise<void> {

@@ -57,9 +57,6 @@ function extractCommand(value: unknown): string | null {
 }
 
 function extractChanges(value: unknown): Record<string, unknown> | null {
-    const record = asRecord(value);
-    if (record) return record;
-
     if (Array.isArray(value)) {
         const changes: Record<string, unknown> = {};
         for (const entry of value) {
@@ -72,6 +69,9 @@ function extractChanges(value: unknown): Record<string, unknown> | null {
         }
         return Object.keys(changes).length > 0 ? changes : null;
     }
+
+    const record = asRecord(value);
+    if (record) return record;
 
     return null;
 }

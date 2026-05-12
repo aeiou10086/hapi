@@ -144,3 +144,51 @@ export interface TurnInterruptResponse {
     ok: boolean;
     [key: string]: unknown;
 }
+
+export interface ThreadCompactStartParams {
+    threadId: string;
+}
+
+export interface ThreadCompactStartResponse {
+    [key: string]: unknown;
+}
+
+export type ReviewTarget =
+    | { type: 'uncommittedChanges' }
+    | { type: 'baseBranch'; branch: string }
+    | { type: 'commit'; sha: string };
+
+export interface ReviewStartParams {
+    threadId: string;
+    target: ReviewTarget;
+    delivery?: 'inline' | 'detached';
+}
+
+export interface ReviewStartResponse {
+    turn?: {
+        id: string;
+        status?: string;
+    };
+    reviewThreadId?: string;
+    [key: string]: unknown;
+}
+
+export interface ThreadRollbackParams {
+    threadId: string;
+    numTurns: number;
+}
+
+export interface ThreadRollbackResponse {
+    thread?: Record<string, unknown>;
+    [key: string]: unknown;
+}
+
+export interface GitDiffToRemoteParams {
+    cwd: string;
+}
+
+export interface GitDiffToRemoteResponse {
+    sha: string;
+    diff: string;
+    [key: string]: unknown;
+}

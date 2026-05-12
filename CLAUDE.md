@@ -25,6 +25,7 @@ exec bun run --cwd "$HOME/projects/hapi/cli" src/index.ts "$@"
 
 每次改完源码后：
 
+0. **人机分工**：Agent 负责执行必要的 build/typecheck/test；用户负责浏览器/真实产品里的手工验证。
 1. 改完 → 跟用户说清"改了什么"，并**明确告诉他验证这次改动需要做什么**：
    - 改了 `web/src/**` → "需要 `bun run build:web` + 浏览器硬刷新"
    - 改了 `hub/src/**` → "需要重启 hub"

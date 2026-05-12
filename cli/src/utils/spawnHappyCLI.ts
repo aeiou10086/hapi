@@ -31,6 +31,7 @@ import { fileURLToPath } from 'node:url';
 import { isBunCompiled, projectPath } from '@/projectPath';
 import { logger } from '@/ui/logger';
 import { existsSync } from 'node:fs';
+import { withInteractiveShellEnvFallback } from '@/utils/shellEnv';
 
 /**
  * Resolve the TypeScript entrypoint for development mode.
@@ -134,7 +135,7 @@ export function spawnHappyCLI(args: string[], options: SpawnOptions = {}): Child
   // windowsHide: true suppresses this to prevent cmd windows from accumulating.
   const finalOptions: SpawnOptions = { ...options };
   if (!isBunCompiled()) {
-    const finalEnv = { ...process.env, ...options.env };
+    const finalEnv = withInteractiveShellEnvFallback({ ...process.env, ...options.env });
     const invokedCwd = finalEnv.HAPI_INVOKED_CWD?.trim();
     const hasExplicitCwd = 'cwd' in options && options.cwd !== undefined;
     finalEnv.HAPI_INVOKED_CWD = hasExplicitCwd

@@ -11,9 +11,14 @@ const BUILTIN_COMMANDS: Record<string, SlashCommand[]> = {
         { name: 'stats', description: 'Show your Claude Code usage statistics and activity', source: 'builtin' },
         { name: 'status', description: 'Show Claude Code status including version, model, account, and API connectivity', source: 'builtin' },
     ],
-    // Codex remote turns send slash-prefixed input as plain text to app-server.
-    // Hide built-ins here until remote slash command execution is implemented end-to-end.
-    codex: [],
+    codex: [
+        { name: 'compact', description: 'Summarize conversation history and free up context', source: 'builtin' },
+        { name: 'diff', description: 'Show the current git diff', source: 'builtin' },
+        { name: 'new', description: 'Start a fresh Codex thread', source: 'builtin' },
+        { name: 'review', description: 'Review current changes or a specified branch/commit', source: 'builtin' },
+        { name: 'status', description: 'Show current Codex session status', source: 'builtin' },
+        { name: 'undo', description: 'Roll back the last Codex turn from thread history', source: 'builtin' },
+    ],
     gemini: [
         { name: 'about', description: 'Show version info', source: 'builtin' },
         { name: 'clear', description: 'Clear the screen and conversation history', source: 'builtin' },
@@ -23,14 +28,7 @@ const BUILTIN_COMMANDS: Record<string, SlashCommand[]> = {
     opencode: [],
 }
 
-const UNSUPPORTED_CODEX_BUILTIN_COMMANDS = new Set([
-    'review',
-    'new',
-    'compat',
-    'undo',
-    'diff',
-    'status',
-])
+const UNSUPPORTED_CODEX_BUILTIN_COMMANDS = new Set<string>([])
 
 export function getBuiltinSlashCommands(agentType: string): SlashCommand[] {
     return BUILTIN_COMMANDS[agentType] ?? BUILTIN_COMMANDS.claude ?? []

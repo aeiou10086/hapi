@@ -5,7 +5,10 @@ import type { EnhancedMode } from './loop';
 const harness = vi.hoisted(() => ({
     notifications: [] as Array<{ method: string; params: unknown }>,
     registerRequestCalls: [] as string[],
-    initializeCalls: [] as unknown[]
+    initializeCalls: [] as unknown[],
+    turnStartedIncludesId: false,
+    turnCompletedIncludesId: false,
+    startTurnReturnsId: false
 }));
 
 vi.mock('./codexAppServerClient', () => {
@@ -35,16 +38,17 @@ vi.mock('./codexAppServerClient', () => {
             return { thread: { id: 'thread-anonymous' }, model: 'gpt-5.4' };
         }
 
-        async startTurn(): Promise<{ turn: Record<string, never> }> {
-            const started = { turn: {} };
+        async startTurn(): Promise<{ turn: { id?: string } }> {
+            const turnId = 'turn-current';
+            const started = { turn: harness.turnStartedIncludesId ? { id: turnId } : {} };
             harness.notifications.push({ method: 'turn/started', params: started });
             this.notificationHandler?.('turn/started', started);
 
-            const completed = { status: 'Completed', turn: {} };
+            const completed = { status: 'Completed', turn: harness.turnCompletedIncludesId ? { id: turnId } : {} };
             harness.notifications.push({ method: 'turn/completed', params: completed });
             this.notificationHandler?.('turn/completed', completed);
 
-            return { turn: {} };
+            return { turn: harness.startTurnReturnsId ? { id: turnId } : {} };
         }
 
         async interruptTurn(): Promise<Record<string, never>> {
@@ -168,6 +172,9 @@ describe('codexRemoteLauncher', () => {
         harness.notifications = [];
         harness.registerRequestCalls = [];
         harness.initializeCalls = [];
+        harness.turnStartedIncludesId = false;
+        harness.turnCompletedIncludesId = false;
+        harness.startTurnReturnsId = false;
     });
 
     it('finishes a turn and emits ready when task lifecycle events omit turn_id', async () => {
@@ -194,6 +201,25 @@ describe('codexRemoteLauncher', () => {
             }
         }]);
         expect(harness.notifications.map((entry) => entry.method)).toEqual(['turn/started', 'turn/completed']);
+        expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
+        expect(thinkingChanges).toContain(true);
+        expect(session.thinking).toBe(false);
+    });
+
+    it('finishes a turn when task_started has turn_id but task_complete omits it', async () => {
+        harness.turnStartedIncludesId = true;
+        harness.turnCompletedIncludesId = false;
+        harness.startTurnReturnsId = true;
+
+        const {
+            session,
+            sessionEvents,
+            thinkingChanges
+        } = createSessionStub();
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
         expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
         expect(thinkingChanges).toContain(true);
         expect(session.thinking).toBe(false);

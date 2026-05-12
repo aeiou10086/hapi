@@ -107,6 +107,7 @@ export function HappyThread(props: {
     const onAtBottomChangeRef = useRef(props.onAtBottomChange)
     const onFlushPendingRef = useRef(props.onFlushPending)
     const forceScrollTokenRef = useRef(props.forceScrollToken)
+    const pendingForceScrollRef = useRef<{ token: number; messagesVersion: number } | null>(null)
     // The library's threadViewportStore — captured by ViewportStoreCapture
     // (a no-op child rendered inside ThreadPrimitive.Viewport). We mirror our
     // "user has scrolled up" decision into the library's `isAtBottom` so its
@@ -139,6 +140,21 @@ export function HappyThread(props: {
         onLoadMoreRef.current = props.onLoadMore
     }, [props.onLoadMore])
 
+    const enableAutoScroll = useCallback(() => {
+        if (!autoScrollEnabledRef.current) {
+            autoScrollEnabledRef.current = true
+            setAutoScrollEnabled(true)
+        }
+    }, [])
+
+    const disableAutoScroll = useCallback(() => {
+        if (autoScrollEnabledRef.current) {
+            autoScrollEnabledRef.current = false
+            setAutoScrollEnabled(false)
+        }
+        viewportStoreRef.current?.setState({ isAtBottom: false })
+    }, [])
+
     // Track scroll position to toggle autoScroll (stable listener using refs)
     useEffect(() => {
         const viewport = viewportRef.current
@@ -146,6 +162,7 @@ export function HappyThread(props: {
 
         const THRESHOLD_PX = 120
         let lastScrollTop = viewport.scrollTop
+        let lastTouchY: number | null = null
 
         const handleScroll = () => {
             const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
@@ -153,19 +170,17 @@ export function HappyThread(props: {
             const scrolledUp = viewport.scrollTop < lastScrollTop
             lastScrollTop = viewport.scrollTop
 
-            if (isNearBottom) {
-                if (!autoScrollEnabledRef.current) setAutoScrollEnabled(true)
+            if (scrolledUp && distanceFromBottom > 1) {
+                // Disable following immediately on upward intent, even inside
+                // the "near bottom" threshold. Otherwise streaming resizes can
+                // keep snapping back and make history scrolling feel sticky.
+                disableAutoScroll()
+            } else if (isNearBottom) {
+                enableAutoScroll()
+                viewportStoreRef.current?.setState({ isAtBottom: true })
             } else if (autoScrollEnabledRef.current) {
+                autoScrollEnabledRef.current = false
                 setAutoScrollEnabled(false)
-            }
-
-            // Mirror to the library's isAtBottom *immediately* on any user
-            // upward scroll (even tiny) so its resize callback won't re-pin
-            // before its own scroll listener catches up. Avoids the post-Abort
-            // race where two reflows fire (remove-thinking + add-message)
-            // around the user's wheel event.
-            if (scrolledUp && distanceFromBottom > 1 && viewportStoreRef.current) {
-                viewportStoreRef.current.setState({ isAtBottom: false })
             }
 
             if (isNearBottom !== atBottomRef.current) {
@@ -177,27 +192,56 @@ export function HappyThread(props: {
             }
         }
 
+        const handleWheel = (event: WheelEvent) => {
+            if (event.deltaY < 0) {
+                disableAutoScroll()
+            }
+        }
+
+        const handleTouchStart = (event: TouchEvent) => {
+            lastTouchY = event.touches[0]?.clientY ?? null
+        }
+
+        const handleTouchMove = (event: TouchEvent) => {
+            const nextY = event.touches[0]?.clientY ?? null
+            if (lastTouchY !== null && nextY !== null && nextY > lastTouchY) {
+                disableAutoScroll()
+            }
+            lastTouchY = nextY
+        }
+
         viewport.addEventListener('scroll', handleScroll, { passive: true })
-        return () => viewport.removeEventListener('scroll', handleScroll)
-    }, []) // Stable: no dependencies, reads from refs
+        viewport.addEventListener('wheel', handleWheel, { passive: true })
+        viewport.addEventListener('touchstart', handleTouchStart, { passive: true })
+        viewport.addEventListener('touchmove', handleTouchMove, { passive: true })
+        return () => {
+            viewport.removeEventListener('scroll', handleScroll)
+            viewport.removeEventListener('wheel', handleWheel)
+            viewport.removeEventListener('touchstart', handleTouchStart)
+            viewport.removeEventListener('touchmove', handleTouchMove)
+        }
+    }, [disableAutoScroll, enableAutoScroll]) // Stable: reads changing values from refs
 
     // Scroll to bottom handler for the indicator button
-    const scrollToBottom = useCallback(() => {
+    const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
         const viewport = viewportRef.current
         if (viewport) {
-            viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' })
+            viewport.scrollTo({ top: viewport.scrollHeight, behavior })
         }
-        setAutoScrollEnabled(true)
+        enableAutoScroll()
+        viewportStoreRef.current?.setState({ isAtBottom: true })
         if (!atBottomRef.current) {
             atBottomRef.current = true
             onAtBottomChangeRef.current(true)
         }
         onFlushPendingRef.current()
-    }, [])
+    }, [enableAutoScroll])
 
     // Reset state when session changes
     useEffect(() => {
+        autoScrollEnabledRef.current = true
         setAutoScrollEnabled(true)
+        viewportStoreRef.current?.setState({ isAtBottom: true })
         atBottomRef.current = true
         onAtBottomChangeRef.current(true)
         forceScrollTokenRef.current = props.forceScrollToken
@@ -208,8 +252,23 @@ export function HappyThread(props: {
             return
         }
         forceScrollTokenRef.current = props.forceScrollToken
-        scrollToBottom()
-    }, [props.forceScrollToken, scrollToBottom])
+        pendingForceScrollRef.current = {
+            token: props.forceScrollToken,
+            messagesVersion: props.messagesVersion
+        }
+        scrollToBottom('auto')
+    }, [props.forceScrollToken, props.messagesVersion, scrollToBottom])
+
+    useLayoutEffect(() => {
+        const pending = pendingForceScrollRef.current
+        if (!pending || pending.messagesVersion === props.messagesVersion) {
+            return
+        }
+        pendingForceScrollRef.current = null
+        requestAnimationFrame(() => {
+            scrollToBottom('auto')
+        })
+    }, [props.messagesVersion, scrollToBottom])
 
     const handleLoadMore = useCallback(() => {
         if (isLoadingMessagesRef.current || !hasMoreMessagesRef.current || isLoadingMoreRef.current || loadLockRef.current) {

@@ -85,6 +85,41 @@ describe('AppServerEventConverter', () => {
         }]);
     });
 
+    it('maps file change arrays using file paths as change keys', () => {
+        const converter = new AppServerEventConverter();
+
+        const started = converter.handleNotification('item/started', {
+            item: {
+                id: 'patch-1',
+                type: 'fileChange',
+                changes: [{ path: '/repo/src/a.ts', diff: '@@ -1 +1 @@' }]
+            }
+        });
+        expect(started).toEqual([{
+            type: 'patch_apply_begin',
+            call_id: 'patch-1',
+            changes: {
+                '/repo/src/a.ts': { path: '/repo/src/a.ts', diff: '@@ -1 +1 @@' }
+            }
+        }]);
+
+        const completed = converter.handleNotification('item/completed', {
+            item: {
+                id: 'patch-1',
+                type: 'fileChange',
+                success: true
+            }
+        });
+        expect(completed).toEqual([{
+            type: 'patch_apply_end',
+            call_id: 'patch-1',
+            changes: {
+                '/repo/src/a.ts': { path: '/repo/src/a.ts', diff: '@@ -1 +1 @@' }
+            },
+            success: true
+        }]);
+    });
+
     it('maps reasoning deltas', () => {
         const converter = new AppServerEventConverter();
 

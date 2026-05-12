@@ -434,6 +434,15 @@ const CodexPatchResultView: ToolViewComponent = (props: ToolViewProps) => {
         )
     }
 
+    if (isObject(result) && result.success === true) {
+        return (
+            <>
+                <div className="text-sm text-[var(--app-hint)]">Done</div>
+                <RawJsonDevOnly value={result} />
+            </>
+        )
+    }
+
     if (result === undefined || result === null) {
         return props.block.tool.state === 'completed'
             ? <div className="text-sm text-[var(--app-hint)]">Done</div>

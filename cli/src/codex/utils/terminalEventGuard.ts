@@ -13,7 +13,7 @@ export function shouldIgnoreTerminalEvent(input: TerminalEventGuardInput): boole
     }
 
     if (input.currentTurnId) {
-        return true;
+        return !input.turnInFlight;
     }
 
     if (input.turnInFlight && !allowAnonymousTerminalEvent) {

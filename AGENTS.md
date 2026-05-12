@@ -1,148 +1,72 @@
-# AGENTS.md
+# 本地开发约定
 
-Work style: telegraph; noun-phrases ok; drop grammar;
+## 改完源码不需要"部署"
 
-Short guide for AI agents in this repo. Prefer progressive loading: start with the root README, then package READMEs as needed.
+`hapi` 命令是个 wrapper 脚本，直接用 `bun run` 跑本仓库源码。
 
-## What is HAPI?
-
-Local-first platform for running AI coding agents (Claude Code, Codex, Gemini) with remote control via web/phone. CLI wraps agents and connects to hub; hub serves web app and handles real-time sync.
-
-## Repo layout
-
-```
-cli/     - CLI binary, agent wrappers, runner daemon
-hub/     - HTTP API + Socket.IO + SSE + Telegram bot
-web/     - React PWA for remote control
-shared/  - Common types, schemas, utilities
-docs/    - VitePress documentation site
-website/ - Marketing site
-```
-
-Bun workspaces; `shared` consumed by cli, hub, web.
-
-## Architecture overview
-
-```
-┌─────────┐  Socket.IO   ┌─────────┐   SSE/REST   ┌─────────┐
-│   CLI   │ ──────────── │   Hub   │ ──────────── │   Web   │
-│ (agent) │              │ (server)│              │  (PWA)  │
-└─────────┘              └─────────┘              └─────────┘
-     │                        │                        │
-     ├─ Wraps Claude/Codex    ├─ SQLite persistence   ├─ TanStack Query
-     ├─ Socket.IO client      ├─ Session cache        ├─ SSE for updates
-     └─ RPC handlers          ├─ RPC gateway          └─ assistant-ui
-                              └─ Telegram bot
-```
-
-**Data flow:**
-1. CLI spawns agent (claude/codex/gemini), connects to hub via Socket.IO
-2. Agent events → CLI → hub (socket `message` event) → DB + SSE broadcast
-3. Web subscribes to SSE `/api/events`, receives live updates
-4. User actions → Web → hub REST API → RPC to CLI → agent
-
-## Reference docs
-
-- `README.md` - User overview, quick start
-- `cli/README.md` - CLI commands, config, runner
-- `hub/README.md` - Hub config, HTTP API, Socket.IO events
-- `web/README.md` - Routes, components, hooks
-- `docs/guide/` - User guides (installation, how-it-works, FAQ)
-
-## Shared rules
-
-- No backward compatibility: breaking old formats freely
-- Prioritize Pragmatism, and Avoid Overengineering.
-- Write necessary tests ONLY.
-- TypeScript strict; no untyped code
-- Bun workspaces; run `bun` commands from repo root
-- Path alias `@/*` maps to `./src/*` per package
-- Prefer 4-space indentation
-- Zod for runtime validation (schemas in `shared/src/schemas.ts`)
-
-## Common commands (repo root)
-
+`which hapi` → `/Users/maseww/.nvm/versions/node/v22.18.0/bin/hapi`（symlink）→ `…/lib/node_modules/@twsxtd/hapi/bin/hapi.cjs`：
 ```bash
-bun typecheck           # All packages
-bun run test            # cli + hub tests
-bun run dev             # hub + web concurrently
-bun run build:single-exe # All-in-one binary
+#!/bin/bash
+export PATH="$HOME/.bun/bin:$PATH"
+exec bun run --cwd "$HOME/projects/hapi/cli" src/index.ts "$@"
 ```
 
-## Key source dirs
+所以改 cli/hub：保存即生效，下次执行 `hapi` 就是新版本。
 
-### CLI (`cli/src/`)
-- `api/` - Hub connection (Socket.IO client, auth)
-- `claude/` - Claude Code integration (wrapper, hooks)
-- `codex/` - Codex mode integration
-- `agent/` - Multi-agent support (Gemini via ACP)
-- `runner/` - Background daemon for remote spawn
-- `commands/` - CLI subcommands (auth, runner, doctor)
-- `modules/` - Tool implementations (ripgrep, difftastic, git)
-- `ui/` - Terminal UI (Ink components)
+⚠️ **唯一例外：web 端的修改**。hub 服务的是 `web/dist/` 里的预构建 bundle（`hub/src/web/server.ts:181`）。改完 `web/src/**` 必须 `bun run build:web` 重打 + 浏览器硬刷新（Cmd+Shift+R 避开 PWA SW 缓存）；或开 `bun run dev:web` 用 Vite HMR（访问的是 Vite dev 端口，不是 hapi 端口）。
 
-### Hub (`hub/src/`)
-- `web/routes/` - REST API endpoints
-- `socket/` - Socket.IO setup
-- `socket/handlers/cli/` - CLI event handlers (session, terminal, machine, RPC)
-- `sync/` - Core logic (sessionCache, messageService, rpcGateway)
-- `store/` - SQLite persistence (better-sqlite3)
-- `sse/` - Server-Sent Events manager
-- `telegram/` - Bot commands, callbacks
-- `notifications/` - Push (VAPID) and Telegram notifications
-- `config/` - Settings loading, token generation
-- `visibility/` - Client visibility tracking
+可选 typecheck：`bun run typecheck`（或 `:cli` / `:web` / `:hub`）。
 
-### Web (`web/src/`)
-- `routes/` - TanStack Router pages
-- `routes/sessions/` - Session views (chat, files, terminal)
-- `components/` - Reusable UI (SessionList, SessionChat, NewSession/)
-- `hooks/queries/` - TanStack Query hooks
-- `hooks/mutations/` - Mutation hooks
-- `hooks/useSSE.ts` - SSE subscription
-- `api/client.ts` - API client wrapper
+## 提交：push 到自己的 fork
 
-### Shared (`shared/src/`)
-- `types.ts` - Core types (Session, Message, Machine)
-- `schemas.ts` - Zod schemas for validation
-- `socket.ts` - Socket.IO event types
-- `messages.ts` - Message parsing utilities
-- `modes.ts` - Permission/model mode definitions
+远程 `mine` → `git@github.com:aeiou10086/hapi.git`。`origin` 是上游 `tiann/hapi`，**不要直接 push**。
 
-## Testing
+## 修改与验证流程（重要）
 
-- Test framework: Vitest (via `bun run test`)
-- Test files: `*.test.ts` next to source
-- Run: `bun run test` (from root) or `bun run test` (from package)
-- Hub tests: `hub/src/**/*.test.ts`
-- CLI tests: `cli/src/**/*.test.ts`
-- No web tests currently
+每次改完源码后：
 
-## Common tasks
+0. **人机分工**：Agent 负责执行必要的 build/typecheck/test；用户负责浏览器/真实产品里的手工验证。
+1. 改完 → 跟用户说清"改了什么"，并**明确告诉他验证这次改动需要做什么**：
+   - 改了 `web/src/**` → "需要 `bun run build:web` + 浏览器硬刷新"
+   - 改了 `hub/src/**` → "需要重启 hub"
+   - 改了 `cli/src/**` → "**需要新开一个 hapi session**——老 session 在启动时就把 cli 代码加载进内存了，不会自动 reload，里面跑的还是旧代码"
+     - 例外：`claudeRemote.ts` 里 init handler 这种"每次 spawn binary 都重新执行"的代码段，老 session 触发新一轮 binary spawn 就能生效，不必新开
+   - 然后**主动询问用户是否已验证**
+2. 用户**确认验证通过** → **立即** `git add` + `git commit` + `git push mine`，**别等用户再催**
+3. 用户**还没验证 / 只验证了部分** → 把"未验证的具体改动列表"明确记下来（必要时 TodoWrite），后面有交互机会就**主动提醒** "刚才的 X、Y 改动你还没验证，要不要现在测一下"
+4. **不要积累一堆未验证 + 未提交的改动**——回头分不清哪个是干净的、哪个还在调
 
-| Task | Key files |
-|------|-----------|
-| Add CLI command | `cli/src/commands/`, `cli/src/index.ts` |
-| Add API endpoint | `hub/src/web/routes/`, register in `hub/src/web/index.ts` |
-| Add Socket.IO event | `hub/src/socket/handlers/cli/`, `shared/src/socket.ts` |
-| Add web route | `web/src/routes/`, `web/src/router.tsx` |
-| Add web component | `web/src/components/` |
-| Modify session logic | `hub/src/sync/sessionCache.ts`, `hub/src/sync/syncEngine.ts` |
-| Modify message handling | `hub/src/sync/messageService.ts` |
-| Add notification type | `hub/src/notifications/` |
-| Add shared type | `shared/src/types.ts`, `shared/src/schemas.ts` |
+**典型踩坑**：长跑 1 天以上的 session 里测一个新加的 cli 命令处理逻辑——永远看不到效果，因为老 session 用的是它启动那天的代码。先在 web UI 里**新建会话**再测。
 
-## Important patterns
+## 不要做的事
 
-- **RPC**: CLI registers handlers (`rpc-register`), hub routes requests via `rpcGateway.ts`
-- **Versioned updates**: CLI sends `update-metadata`/`update-state` with version; hub rejects stale
-- **Session modes**: `local` (terminal) vs `remote` (web-controlled); switchable mid-session
-- **Permission modes**: `default`, `acceptEdits`, `bypassPermissions`, `plan`
-- **Namespaces**: Multi-user isolation via `CLI_API_TOKEN:<namespace>` suffix
+- **不要 `bun run build:single-exe` 然后覆盖 `bin/hapi`**——会替换掉上面那个 wrapper，失去"改完即生效"。
+- **不要 `bun run release-all`**——这是上游 `@twsxtd` scope 的 npm 发布脚本，本地 fork 没权限。
 
-## Critical Thinking
+如果误覆盖了 wrapper：`npm i -g @twsxtd/hapi` 重装，再把 wrapper 内容写回 `…/@twsxtd/hapi/bin/hapi.cjs`。
 
-1. Fix root cause (not band-aid).
-2. Unsure: read more code; if still stuck, ask w/ short options.
-3. Conflicts: call out; pick safer path.
-4. Unrecognized changes: assume other agent; keep going; focus your changes. If it causes issues, stop + ask user.
+## Hub 本地数据：`~/.hapi/hapi.db`（SQLite / better-sqlite3）
+
+排查 web ↔ CLI 同步、消息丢失/重复时，查 DB 比看日志快。`hapi.db-wal` / `-shm` 是 WAL 模式副产物。
+
+**关键表**：
+- `messages` — 列：`id, session_id, content (JSON 字符串), created_at, seq, local_id`
+- `sessions` — `metadata` 列里有 `claudeSessionId` 等
+
+**`local_id` 前缀反查写入方**——出问题时按前缀就能定位代码：
+- `local-<ts>-<rand>` → web 端 `web/src/lib/messages.ts` 的 `makeClientSideId('local')`（webapp 通过 `POST /sessions/:id/messages` 写入）
+- `tw:<jsonl-uuid>` → hub 端 `hub/src/sync/transcriptWatcher.ts` 同步 JSONL transcript 时生成
+- `null` → 多半是 CLI 通过 socket `'message'` 事件 push 的 agent 输出
+
+**常用查询**：
+```bash
+# claude session id (来自 ps 里 --resume) → hub session id
+sqlite3 ~/.hapi/hapi.db "SELECT id FROM sessions WHERE metadata LIKE '%<claude-session-uuid>%' LIMIT 1;"
+
+# 某 session 最近的 user 消息（排除 tool_result 噪声）
+sqlite3 ~/.hapi/hapi.db "SELECT seq, datetime(created_at/1000,'unixepoch','localtime'), local_id, substr(content,1,80) \
+  FROM messages WHERE session_id='<hapi-session-id>' AND content LIKE '%role\":\"user\"%' AND content NOT LIKE '%tool_result%' \
+  ORDER BY seq DESC LIMIT 10;"
+```
+
+**Claude Code 自身的 JSONL transcript** 是另一份独立来源：`~/.claude/projects/<escaped-cwd>/<claude-session-uuid>.jsonl`（escaped-cwd 把 `/` 换成 `-`）。这是二进制直接写的真相，hub DB 是同步进来的副本。**两边对不上时以 JSONL 为准**。

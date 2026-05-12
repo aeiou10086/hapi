@@ -6,19 +6,25 @@ import { listSlashCommands } from './slashCommands'
 
 describe('listSlashCommands', () => {
     const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
+    const originalCodexHome = process.env.CODEX_HOME
     let sandboxDir: string
     let claudeConfigDir: string
+    let codexHome: string
     let projectDir: string
 
     beforeEach(async () => {
         sandboxDir = await mkdtemp(join(tmpdir(), 'hapi-slash-commands-'))
         claudeConfigDir = join(sandboxDir, 'global-claude')
+        codexHome = join(sandboxDir, 'global-codex')
         projectDir = join(sandboxDir, 'project')
 
         process.env.CLAUDE_CONFIG_DIR = claudeConfigDir
+        process.env.CODEX_HOME = codexHome
 
         await mkdir(join(claudeConfigDir, 'commands'), { recursive: true })
+        await mkdir(join(codexHome, 'prompts'), { recursive: true })
         await mkdir(join(projectDir, '.claude', 'commands'), { recursive: true })
+        await mkdir(join(projectDir, '.codex', 'prompts'), { recursive: true })
     })
 
     afterEach(async () => {
@@ -26,6 +32,12 @@ describe('listSlashCommands', () => {
             delete process.env.CLAUDE_CONFIG_DIR
         } else {
             process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir
+        }
+
+        if (originalCodexHome === undefined) {
+            delete process.env.CODEX_HOME
+        } else {
+            process.env.CODEX_HOME = originalCodexHome
         }
 
         await rm(sandboxDir, { recursive: true, force: true })
@@ -91,6 +103,24 @@ describe('listSlashCommands', () => {
         expect(command).toBeDefined()
         expect(command?.source).toBe('project')
         expect(command?.description).toBe('Trellis start')
+    })
+
+
+
+    it('loads Codex prompts from CODEX_HOME and project .codex/prompts', async () => {
+        await writeFile(
+            join(codexHome, 'prompts', 'global-codex.md'),
+            ['---', 'description: Global Codex prompt', '---', '', 'Global prompt'].join('\n')
+        )
+        await writeFile(
+            join(projectDir, '.codex', 'prompts', 'project-codex.md'),
+            ['---', 'description: Project Codex prompt', '---', '', 'Project prompt'].join('\n')
+        )
+
+        const commands = await listSlashCommands('codex', projectDir)
+        expect(commands.find(cmd => cmd.name === 'global-codex')?.source).toBe('user')
+        expect(commands.find(cmd => cmd.name === 'project-codex')?.source).toBe('project')
+        expect(commands.find(cmd => cmd.name === 'compact')?.source).toBe('builtin')
     })
 
     it('returns empty project commands when project directory does not exist', async () => {

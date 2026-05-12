@@ -6,6 +6,7 @@ import type { ChecklistItem } from '@/components/ToolCard/checklist'
 import { extractTodoChecklist, extractUpdatePlanChecklist } from '@/components/ToolCard/checklist'
 import { basename, resolveDisplayPath } from '@/utils/path'
 import { getInputStringAny, truncate } from '@/lib/toolInputUtils'
+import { extractCodexPatchChanges } from '@/components/ToolCard/codexPatch'
 
 const DEFAULT_ICON_CLASS = 'h-3.5 w-3.5'
 // Tool presentation registry for `hapi/web` (aligned with `hapi-app`).
@@ -306,15 +307,12 @@ export const knownTools: Record<string, {
         icon: () => <FileDiffIcon className={DEFAULT_ICON_CLASS} />,
         title: () => 'Apply changes',
         subtitle: (opts) => {
-            if (isObject(opts.input) && isObject(opts.input.changes)) {
-                const files = Object.keys(opts.input.changes)
-                if (files.length === 0) return null
-                const first = files[0]
-                const display = resolveDisplayPath(first, opts.metadata)
-                const name = basename(display)
-                return files.length > 1 ? `${name} (+${files.length - 1})` : name
-            }
-            return null
+            const changes = extractCodexPatchChanges(opts.input)
+            if (changes.length === 0) return null
+            const first = changes[0]
+            const display = resolveDisplayPath(first.path, opts.metadata)
+            const name = basename(display)
+            return changes.length > 1 ? `${name} (+${changes.length - 1})` : name
         },
         minimal: true
     },

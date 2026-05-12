@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { shouldIgnoreTerminalEvent } from './terminalEventGuard';
 
 describe('shouldIgnoreTerminalEvent', () => {
-    it('ignores terminal events without turn_id when current turn id exists', () => {
+    it('accepts terminal events without turn_id when the current turn is in flight', () => {
         const ignored = shouldIgnoreTerminalEvent({
             eventTurnId: null,
             currentTurnId: 'turn-1',
             turnInFlight: true
         });
 
-        expect(ignored).toBe(true);
+        expect(ignored).toBe(false);
     });
 
     it('ignores terminal events without turn_id while a turn is still in flight', () => {
@@ -33,11 +33,11 @@ describe('shouldIgnoreTerminalEvent', () => {
         expect(ignored).toBe(false);
     });
 
-    it('still ignores terminal events without turn_id when current turn id exists', () => {
+    it('ignores terminal events without turn_id when a current turn id exists but no turn is in flight', () => {
         const ignored = shouldIgnoreTerminalEvent({
             eventTurnId: null,
             currentTurnId: 'turn-1',
-            turnInFlight: true,
+            turnInFlight: false,
             allowAnonymousTerminalEvent: true
         });
 

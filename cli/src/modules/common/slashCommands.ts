@@ -32,7 +32,14 @@ const BUILTIN_COMMANDS: Record<string, SlashCommand[]> = {
         { name: 'cost', description: 'Show session cost', source: 'builtin' },
         { name: 'plan', description: 'Toggle plan mode', source: 'builtin' },
     ],
-    codex: [],
+    codex: [
+        { name: 'compact', description: 'Summarize conversation history and free up context', source: 'builtin' },
+        { name: 'diff', description: 'Show the current git diff', source: 'builtin' },
+        { name: 'new', description: 'Start a fresh Codex thread', source: 'builtin' },
+        { name: 'review', description: 'Review current changes or a specified branch/commit', source: 'builtin' },
+        { name: 'status', description: 'Show current Codex session status', source: 'builtin' },
+        { name: 'undo', description: 'Roll back the last Codex turn from thread history', source: 'builtin' },
+    ],
     gemini: [
         { name: 'about', description: 'About Gemini', source: 'builtin' },
         { name: 'clear', description: 'Clear conversation', source: 'builtin' },

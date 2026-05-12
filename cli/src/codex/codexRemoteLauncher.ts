@@ -16,6 +16,7 @@ import { AppServerEventConverter } from './utils/appServerEventConverter';
 import { registerAppServerPermissionHandlers } from './utils/appServerPermissionAdapter';
 import { buildThreadStartParams, buildTurnStartParams } from './utils/appServerConfig';
 import { shouldIgnoreTerminalEvent } from './utils/terminalEventGuard';
+import { expandCodexCustomSlashCommand, parseCodexBuiltinSlashCommand, type CodexBuiltinSlashCommand } from './utils/slashCommand';
 import {
     RemoteLauncherBase,
     type RemoteLauncherDisplayContext,
@@ -46,7 +47,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         return React.createElement(CodexDisplay, context);
     }
 
-    private async handleAbort(): Promise<void> {
+    private async handleAbort(onAfterAbort?: () => void): Promise<void> {
         logger.debug('[Codex] Abort requested - stopping current task');
         try {
             if (this.currentThreadId && this.currentTurnId) {
@@ -70,6 +71,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         } catch (error) {
             logger.debug('[Codex] Error during abort:', error);
         } finally {
+            onAfterAbort?.();
             this.abortController = new AbortController();
         }
     }
@@ -138,6 +140,22 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
 
         const asString = (value: unknown): string | null => {
             return typeof value === 'string' && value.length > 0 ? value : null;
+        };
+
+        const normalizePatchChanges = (value: unknown): Record<string, unknown> => {
+            if (Array.isArray(value)) {
+                const changes: Record<string, unknown> = {};
+                for (const entry of value) {
+                    const record = asRecord(entry);
+                    if (!record) continue;
+                    const path = asString(record.path ?? record.file ?? record.filePath ?? record.file_path);
+                    if (path) {
+                        changes[path] = record;
+                    }
+                }
+                return changes;
+            }
+            return asRecord(value) ?? {};
         };
 
         const applyResolvedModel = (value: unknown): string | undefined => {
@@ -412,7 +430,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (msgType === 'patch_apply_begin') {
                 const callId = asString(msg.call_id ?? msg.callId);
                 if (callId) {
-                    const changes = asRecord(msg.changes) ?? {};
+                    const changes = normalizePatchChanges(msg.changes);
                     const changeCount = Object.keys(changes).length;
                     const filesMsg = changeCount === 1 ? '1 file' : `${changeCount} files`;
                     messageBuffer.addMessage(`Modifying ${filesMsg}...`, 'tool');
@@ -537,11 +555,6 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client);
         this.happyServer = happyServer;
 
-        this.setupAbortHandlers(session.client.rpcHandlerManager, {
-            onAbort: () => this.handleAbort(),
-            onSwitch: () => this.handleSwitchRequest()
-        });
-
         function logActiveHandles(tag: string) {
             if (!process.env.DEBUG) return;
             const anyProc: any = process as any;
@@ -572,6 +585,174 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         let hasThread = false;
         let pending: QueuedMessage | null = null;
 
+        const sendCommandMessage = (message: string): void => {
+            messageBuffer.addMessage(message, 'status');
+            session.sendAgentMessage({
+                type: 'message',
+                message,
+                id: randomUUID()
+            });
+        };
+
+        const ensureThread = async (messageMode: EnhancedMode): Promise<string> => {
+            if (hasThread && this.currentThreadId) {
+                return this.currentThreadId;
+            }
+
+            const threadParams = buildThreadStartParams({
+                cwd: session.path,
+                mode: messageMode,
+                mcpServers,
+                cliOverrides: session.codexCliOverrides
+            });
+
+            const resumeCandidate = session.sessionId;
+            let threadId: string | null = null;
+
+            if (resumeCandidate) {
+                try {
+                    const resumeResponse = await appServerClient.resumeThread({
+                        threadId: resumeCandidate,
+                        ...threadParams
+                    }, {
+                        signal: this.abortController.signal
+                    });
+                    const resumeRecord = asRecord(resumeResponse);
+                    const resumeThread = resumeRecord ? asRecord(resumeRecord.thread) : null;
+                    threadId = asString(resumeThread?.id) ?? resumeCandidate;
+                    applyResolvedModel(resumeRecord?.model);
+                    logger.debug(`[Codex] Resumed app-server thread ${threadId}`);
+                } catch (error) {
+                    logger.warn(`[Codex] Failed to resume app-server thread ${resumeCandidate}, starting new thread`, error);
+                }
+            }
+
+            if (!threadId) {
+                const threadResponse = await appServerClient.startThread(threadParams, {
+                    signal: this.abortController.signal
+                });
+                const threadRecord = asRecord(threadResponse);
+                const thread = threadRecord ? asRecord(threadRecord.thread) : null;
+                threadId = asString(thread?.id);
+                applyResolvedModel(threadRecord?.model);
+                if (!threadId) {
+                    throw new Error('app-server thread/start did not return thread.id');
+                }
+            }
+
+            this.currentThreadId = threadId;
+            session.onSessionFound(threadId);
+            hasThread = true;
+            return threadId;
+        };
+
+        const markCommandStarted = (turnId?: string | null): void => {
+            turnInFlight = true;
+            if (turnId) {
+                this.currentTurnId = turnId;
+                allowAnonymousTerminalEvent = false;
+            } else if (!this.currentTurnId) {
+                allowAnonymousTerminalEvent = true;
+            }
+        };
+
+        const handleBuiltinSlashCommand = async (command: CodexBuiltinSlashCommand, messageMode: EnhancedMode): Promise<void> => {
+            if (command.kind === 'unsupported') {
+                sendCommandMessage(command.reason);
+                emitReadyIfIdle({
+                    pending,
+                    queueSize: () => session.queue.size(),
+                    shouldExit: this.shouldExit,
+                    sendReady
+                });
+                return;
+            }
+
+            if (command.kind === 'new') {
+                this.currentThreadId = null;
+                this.currentTurnId = null;
+                session.sessionId = null;
+                hasThread = false;
+                sendCommandMessage('Started a fresh Codex thread. Your next message will continue in the new thread.');
+                emitReadyIfIdle({
+                    pending,
+                    queueSize: () => session.queue.size(),
+                    shouldExit: this.shouldExit,
+                    sendReady
+                });
+                return;
+            }
+
+            if (command.kind === 'status') {
+                const status = [
+                    'Codex status:',
+                    `- cwd: ${session.path}`,
+                    `- thread: ${this.currentThreadId ?? session.sessionId ?? 'not started'}`,
+                    `- model: ${session.getModel() ?? 'auto'}`,
+                    `- reasoning effort: ${session.getModelReasoningEffort() ?? 'default'}`,
+                    `- permission mode: ${session.getPermissionMode() ?? 'default'}`,
+                    `- collaboration mode: ${session.getCollaborationMode() ?? 'default'}`,
+                    `- state: ${turnInFlight ? 'thinking' : 'idle'}`
+                ].join('\n');
+                sendCommandMessage(status);
+                emitReadyIfIdle({
+                    pending,
+                    queueSize: () => session.queue.size(),
+                    shouldExit: this.shouldExit,
+                    sendReady
+                });
+                return;
+            }
+
+            if (command.kind === 'diff') {
+                const diffResponse = await appServerClient.gitDiffToRemote({ cwd: session.path });
+                const diff = asString(diffResponse.diff) ?? '';
+                const message = diff.trim().length > 0
+                    ? `Current git diff (${diffResponse.sha ?? 'worktree'}):\n\n\`\`\`diff\n${diff}\n\`\`\``
+                    : 'No git diff found for the current worktree.';
+                sendCommandMessage(message);
+                emitReadyIfIdle({
+                    pending,
+                    queueSize: () => session.queue.size(),
+                    shouldExit: this.shouldExit,
+                    sendReady
+                });
+                return;
+            }
+
+            const threadId = await ensureThread(messageMode);
+
+            if (command.kind === 'compact') {
+                await appServerClient.compactThread({ threadId }, { signal: this.abortController.signal });
+                turnInFlight = true;
+                allowAnonymousTerminalEvent = true;
+                return;
+            }
+
+            if (command.kind === 'review') {
+                const reviewResponse = await appServerClient.startReview({
+                    threadId,
+                    target: command.target,
+                    delivery: 'inline'
+                }, { signal: this.abortController.signal });
+                const reviewRecord = asRecord(reviewResponse);
+                const turn = reviewRecord ? asRecord(reviewRecord.turn) : null;
+                markCommandStarted(asString(turn?.id));
+                return;
+            }
+
+            if (command.kind === 'undo') {
+                await appServerClient.rollbackThread({ threadId, numTurns: command.numTurns });
+                sendCommandMessage(`Rolled back the last ${command.numTurns} Codex turn${command.numTurns === 1 ? '' : 's'}. Local file changes are not reverted.`);
+                emitReadyIfIdle({
+                    pending,
+                    queueSize: () => session.queue.size(),
+                    shouldExit: this.shouldExit,
+                    sendReady
+                });
+            }
+        };
+
         clearReadyAfterTurnTimer = () => {
             if (!readyAfterTurnTimer) {
                 return;
@@ -593,6 +774,26 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }, 120);
             readyAfterTurnTimer.unref?.();
         };
+
+        const markIdleAfterAbort = () => {
+            turnInFlight = false;
+            allowAnonymousTerminalEvent = false;
+            clearReadyAfterTurnTimer?.();
+            if (session.thinking) {
+                session.onThinkingChange(false);
+            }
+            emitReadyIfIdle({
+                pending,
+                queueSize: () => session.queue.size(),
+                shouldExit: this.shouldExit,
+                sendReady
+            });
+        };
+
+        this.setupAbortHandlers(session.client.rpcHandlerManager, {
+            onAbort: () => this.handleAbort(markIdleAfterAbort),
+            onSwitch: () => this.handleSwitchRequest()
+        });
 
         while (!this.shouldExit) {
             logActiveHandles('loop-top');
@@ -619,66 +820,40 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             messageBuffer.addMessage(message.message, 'user');
 
             try {
-                if (!hasThread) {
-                    const threadParams = buildThreadStartParams({
-                        cwd: session.path,
-                        mode: message.mode,
-                        mcpServers,
-                        cliOverrides: session.codexCliOverrides
-                    });
-
-                    const resumeCandidate = session.sessionId;
-                    let threadId: string | null = null;
-
-                    if (resumeCandidate) {
-                        try {
-                            const resumeResponse = await appServerClient.resumeThread({
-                                threadId: resumeCandidate,
-                                ...threadParams
-                            }, {
-                                signal: this.abortController.signal
-                            });
-                            const resumeRecord = asRecord(resumeResponse);
-                            const resumeThread = resumeRecord ? asRecord(resumeRecord.thread) : null;
-                            threadId = asString(resumeThread?.id) ?? resumeCandidate;
-                            applyResolvedModel(resumeRecord?.model);
-                            logger.debug(`[Codex] Resumed app-server thread ${threadId}`);
-                        } catch (error) {
-                            logger.warn(`[Codex] Failed to resume app-server thread ${resumeCandidate}, starting new thread`, error);
-                        }
-                    }
-
-                    if (!threadId) {
-                        const threadResponse = await appServerClient.startThread(threadParams, {
-                            signal: this.abortController.signal
-                        });
-                        const threadRecord = asRecord(threadResponse);
-                        const thread = threadRecord ? asRecord(threadRecord.thread) : null;
-                        threadId = asString(thread?.id);
-                        applyResolvedModel(threadRecord?.model);
-                        if (!threadId) {
-                            throw new Error('app-server thread/start did not return thread.id');
-                        }
-                    }
-
-                    if (!threadId) {
-                        throw new Error('app-server resume did not return thread.id');
-                    }
-
-                    this.currentThreadId = threadId;
-                    session.onSessionFound(threadId);
-                    hasThread = true;
+                const expandedCustomCommand = await expandCodexCustomSlashCommand(message.message, session.path);
+                if (expandedCustomCommand) {
+                    logger.debug(`[Codex] Expanded custom slash command to prompt (${expandedCustomCommand.length} chars)`);
+                    message = { ...message, message: expandedCustomCommand };
                 } else {
-                    if (!this.currentThreadId) {
-                        logger.debug('[Codex] Missing thread id; restarting app-server thread');
-                        hasThread = false;
-                        pending = message;
+                    const builtinCommand = parseCodexBuiltinSlashCommand(message.message);
+                    if (builtinCommand) {
+                        try {
+                            await handleBuiltinSlashCommand(builtinCommand, message.mode);
+                        } catch (commandError) {
+                            const commandErrorMessage = commandError instanceof Error ? commandError.message : String(commandError);
+                            logger.warn('[Codex] Slash command failed:', commandError);
+                            sendCommandMessage(`Codex slash command failed: ${commandErrorMessage}`);
+                            emitReadyIfIdle({
+                                pending,
+                                queueSize: () => session.queue.size(),
+                                shouldExit: this.shouldExit,
+                                sendReady
+                            });
+                        }
                         continue;
                     }
                 }
 
+                const threadId = await ensureThread(message.mode);
+                if (!threadId) {
+                    logger.debug('[Codex] Missing thread id; restarting app-server thread');
+                    hasThread = false;
+                    pending = message;
+                    continue;
+                }
+
                 const turnParams = buildTurnStartParams({
-                    threadId: this.currentThreadId,
+                    threadId,
                     message: message.message,
                     cwd: session.path,
                     mode: {
