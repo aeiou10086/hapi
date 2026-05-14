@@ -142,6 +142,17 @@ export const TeamStateSchema = z.object({
 
 export type TeamState = z.infer<typeof TeamStateSchema>
 
+export const CodexCollaborationStateSchema = z.object({
+    status: z.enum(['idle', 'collaborating', 'completed']),
+    active: z.boolean(),
+    activeCallCount: z.number().int().nonnegative(),
+    childThreadCount: z.number().int().nonnegative(),
+    lastEventAt: z.number(),
+    completedAt: z.number().optional()
+})
+
+export type CodexCollaborationState = z.infer<typeof CodexCollaborationStateSchema>
+
 export const AttachmentMetadataSchema = z.object({
     id: z.string(),
     filename: z.string(),
@@ -178,6 +189,7 @@ export const SessionSchema = z.object({
     thinking: z.boolean(),
     thinkingAt: z.number(),
     backgroundTaskCount: z.number().optional(),
+    codexCollaborationState: CodexCollaborationStateSchema.optional(),
     todos: TodosSchema.optional(),
     teamState: TeamStateSchema.optional(),
     model: z.string().nullable().optional().default(null),

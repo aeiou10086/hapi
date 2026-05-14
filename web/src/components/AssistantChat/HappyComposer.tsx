@@ -13,6 +13,7 @@ import {
     useState
 } from 'react'
 import type { AgentState, CodexCollaborationMode, PermissionMode } from '@/types/api'
+import type { CodexCollaborationState } from '@hapi/protocol/types'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import type { ConversationStatus } from '@/realtime/types'
 import { useActiveWord } from '@/hooks/useActiveWord'
@@ -54,6 +55,7 @@ export function HappyComposer(props: {
     thinking?: boolean
     agentState?: AgentState | null
     backgroundTaskCount?: number
+    codexCollaborationState?: CodexCollaborationState
     contextSize?: number
     controlledByUser?: boolean
     agentFlavor?: string | null
@@ -89,6 +91,7 @@ export function HappyComposer(props: {
         thinking = false,
         agentState,
         backgroundTaskCount,
+        codexCollaborationState,
         contextSize,
         controlledByUser = false,
         agentFlavor,
@@ -768,6 +771,7 @@ export function HappyComposer(props: {
                         thinking={thinking}
                         agentState={agentState}
                         backgroundTaskCount={backgroundTaskCount}
+                        codexCollaborationState={codexCollaborationState}
                         contextSize={contextSize}
                         model={model}
                         resolvedModel={resolvedModel}

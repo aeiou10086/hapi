@@ -41,6 +41,13 @@ function extractItem(params: Record<string, unknown>): Record<string, unknown> |
     return item ?? params;
 }
 
+function normalizeStringArray(value: unknown): string[] | null {
+    if (!Array.isArray(value)) {
+        return null;
+    }
+    return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
 function normalizeItemType(value: unknown): string | null {
     const raw = asString(value);
     if (!raw) return null;
@@ -262,6 +269,19 @@ export class AppServerEventConverter {
             const threadId = asString(thread.threadId ?? thread.thread_id ?? thread.id);
             if (threadId) {
                 events.push({ type: 'thread_started', thread_id: threadId });
+            }
+            return events;
+        }
+
+        if (method === 'thread/status/changed') {
+            const status = asString(asRecord(paramsRecord.status)?.type ?? paramsRecord.status);
+            const threadId = asString(paramsRecord.threadId ?? paramsRecord.thread_id);
+            if (threadId && status) {
+                events.push({
+                    type: 'codex_thread_status',
+                    thread_id: threadId,
+                    status
+                });
             }
             return events;
         }
@@ -499,6 +519,26 @@ export class AppServerEventConverter {
 
                     this.fileChangeMeta.delete(itemId);
                 }
+
+                return events;
+            }
+
+            if (itemType === 'collabagenttoolcall') {
+                const tool = asString(item.tool);
+                const status = asString(item.status);
+                const senderThreadId = asString(item.senderThreadId ?? item.sender_thread_id);
+                const receiverThreadIds = normalizeStringArray(item.receiverThreadIds ?? item.receiver_thread_ids) ?? [];
+                const agentsStates = asRecord(item.agentsStates ?? item.agents_states) ?? {};
+
+                events.push({
+                    type: 'codex_collaboration',
+                    call_id: itemId,
+                    ...(tool ? { tool } : {}),
+                    ...(status ? { status } : {}),
+                    ...(senderThreadId ? { sender_thread_id: senderThreadId } : {}),
+                    receiver_thread_ids: receiverThreadIds,
+                    agents_states: agentsStates
+                });
 
                 return events;
             }

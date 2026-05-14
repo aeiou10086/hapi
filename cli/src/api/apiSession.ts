@@ -482,6 +482,7 @@ export class ApiSessionClient extends EventEmitter {
             modelReasoningEffort?: string | null
             effort?: string | null
             collaborationMode?: SessionCollaborationMode
+            codexCollaborationState?: import('./types').SessionCodexCollaborationState
         }
     ): void {
         this.socket.volatile.emit('session-alive', {

@@ -1,5 +1,5 @@
 import { AgentStateSchema, MetadataSchema, TeamStateSchema } from '@hapi/protocol/schemas'
-import type { CodexCollaborationMode, PermissionMode, Session } from '@hapi/protocol/types'
+import type { CodexCollaborationMode, CodexCollaborationState, PermissionMode, Session } from '@hapi/protocol/types'
 import type { Store } from '../store'
 import { clampAliveTime } from './aliveTime'
 import { EventPublisher } from './eventPublisher'
@@ -135,6 +135,7 @@ export class SessionCache {
             thinking: existing?.thinking ?? false,
             thinkingAt: existing?.thinkingAt ?? 0,
             backgroundTaskCount: existing?.backgroundTaskCount ?? 0,
+            codexCollaborationState: existing?.codexCollaborationState,
             todos,
             teamState,
             model: stored.model,
@@ -166,6 +167,7 @@ export class SessionCache {
         modelReasoningEffort?: string | null
         effort?: string | null
         collaborationMode?: CodexCollaborationMode
+        codexCollaborationState?: CodexCollaborationState
     }): void {
         const t = clampAliveTime(payload.time)
         if (!t) return
@@ -180,6 +182,7 @@ export class SessionCache {
         const previousModelReasoningEffort = session.modelReasoningEffort
         const previousEffort = session.effort
         const previousCollaborationMode = session.collaborationMode
+        const previousCodexCollaborationState = session.codexCollaborationState
 
         session.active = true
         session.activeAt = Math.max(session.activeAt, t)
@@ -215,6 +218,9 @@ export class SessionCache {
         if (payload.collaborationMode !== undefined) {
             session.collaborationMode = payload.collaborationMode
         }
+        if (payload.codexCollaborationState !== undefined) {
+            session.codexCollaborationState = payload.codexCollaborationState
+        }
 
         const now = Date.now()
         const lastBroadcastAt = this.lastBroadcastAtBySessionId.get(session.id) ?? 0
@@ -223,6 +229,7 @@ export class SessionCache {
             || previousModelReasoningEffort !== session.modelReasoningEffort
             || previousEffort !== session.effort
             || previousCollaborationMode !== session.collaborationMode
+            || JSON.stringify(previousCodexCollaborationState) !== JSON.stringify(session.codexCollaborationState)
         const shouldBroadcast = (!wasActive && session.active)
             || (wasThinking !== session.thinking)
             || modeChanged
@@ -241,7 +248,8 @@ export class SessionCache {
                     model: session.model,
                     modelReasoningEffort: session.modelReasoningEffort,
                     effort: session.effort,
-                    collaborationMode: session.collaborationMode
+                    collaborationMode: session.collaborationMode,
+                    codexCollaborationState: session.codexCollaborationState
                 }
             })
         }
@@ -277,8 +285,9 @@ export class SessionCache {
         session.thinking = false
         session.thinkingAt = t
         session.backgroundTaskCount = 0
+        session.codexCollaborationState = undefined
 
-        this.publisher.emit({ type: 'session-updated', sessionId: session.id, data: { active: false, thinking: false, backgroundTaskCount: 0 } })
+        this.publisher.emit({ type: 'session-updated', sessionId: session.id, data: { active: false, thinking: false, backgroundTaskCount: 0, codexCollaborationState: undefined } })
     }
 
     expireInactive(now: number = Date.now()): string[] {
@@ -290,8 +299,9 @@ export class SessionCache {
             if (now - session.activeAt <= sessionTimeoutMs) continue
             session.active = false
             session.thinking = false
+            session.codexCollaborationState = undefined
             expired.push(session.id)
-            this.publisher.emit({ type: 'session-updated', sessionId: session.id, data: { active: false } })
+            this.publisher.emit({ type: 'session-updated', sessionId: session.id, data: { active: false, codexCollaborationState: undefined } })
         }
 
         return expired

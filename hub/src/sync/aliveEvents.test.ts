@@ -38,6 +38,45 @@ describe('alive incremental events', () => {
         expect(update.data).toEqual(expect.objectContaining({ active: true }))
     })
 
+    it('includes Codex collaboration state in session alive updates', () => {
+        const store = new Store(':memory:')
+        const events: SyncEvent[] = []
+        const cache = new SessionCache(store, createPublisher(events))
+
+        const session = cache.getOrCreateSession(
+            'session-collaboration-state-test',
+            { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+            { requests: {}, completedRequests: {} },
+            'default'
+        )
+
+        const codexCollaborationState = {
+            status: 'collaborating' as const,
+            active: true,
+            activeCallCount: 1,
+            childThreadCount: 1,
+            lastEventAt: Date.now()
+        }
+
+        events.length = 0
+        cache.handleSessionAlive({
+            sid: session.id,
+            time: Date.now(),
+            thinking: true,
+            codexCollaborationState
+        })
+
+        expect(cache.getSession(session.id)?.codexCollaborationState).toEqual(codexCollaborationState)
+
+        const update = events.find((event) => event.type === 'session-updated')
+        expect(update).toBeDefined()
+        if (!update || update.type !== 'session-updated') {
+            return
+        }
+
+        expect(update.data).toEqual(expect.objectContaining({ codexCollaborationState }))
+    })
+
     it('emits full active machine object on machine alive', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []

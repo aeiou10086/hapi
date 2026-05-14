@@ -32,6 +32,21 @@ describe('AppServerEventConverter', () => {
         expect(failed).toEqual([{ type: 'task_failed', turn_id: 'turn-1', error: 'boom' }]);
     });
 
+    it('maps thread status changes', () => {
+        const converter = new AppServerEventConverter();
+
+        const events = converter.handleNotification('thread/status/changed', {
+            threadId: 'child-thread',
+            status: { type: 'idle' }
+        });
+
+        expect(events).toEqual([{
+            type: 'codex_thread_status',
+            thread_id: 'child-thread',
+            status: 'idle'
+        }]);
+    });
+
     it('accumulates agent message deltas', () => {
         const converter = new AppServerEventConverter();
 
@@ -82,6 +97,62 @@ describe('AppServerEventConverter', () => {
             command: 'ls',
             output: 'ok',
             exit_code: 0
+        }]);
+    });
+
+    it('maps Codex collaboration agent tool calls', () => {
+        const converter = new AppServerEventConverter();
+
+        const started = converter.handleNotification('item/started', {
+            item: {
+                id: 'call-1',
+                type: 'collabAgentToolCall',
+                tool: 'spawnAgent',
+                status: 'inProgress',
+                senderThreadId: 'parent-thread',
+                receiverThreadIds: [],
+                agentsStates: {}
+            }
+        });
+        expect(started).toEqual([{
+            type: 'codex_collaboration',
+            call_id: 'call-1',
+            tool: 'spawnAgent',
+            status: 'inProgress',
+            sender_thread_id: 'parent-thread',
+            receiver_thread_ids: [],
+            agents_states: {}
+        }]);
+
+        const completed = converter.handleNotification('item/completed', {
+            item: {
+                id: 'call-1',
+                type: 'collabAgentToolCall',
+                tool: 'wait',
+                status: 'completed',
+                senderThreadId: 'parent-thread',
+                receiverThreadIds: ['child-thread'],
+                agentsStates: {
+                    'child-thread': {
+                        status: 'completed',
+                        message: 'DONE'
+                    }
+                }
+            }
+        });
+        expect(completed).toEqual([{
+            type: 'codex_collaboration',
+            call_id: 'call-1',
+            tool: 'wait',
+            status: 'completed',
+            sender_thread_id: 'parent-thread',
+            receiver_thread_ids: ['child-thread'],
+            agents_states: {
+                'child-thread': {
+                    status: 'completed',
+                    message: 'DONE'
+                }
+            }
         }]);
     });
 

@@ -7,6 +7,7 @@ import {
 import type { PermissionModeTone } from '@hapi/protocol'
 import { useMemo } from 'react'
 import type { AgentState, CodexCollaborationMode, PermissionMode } from '@/types/api'
+import type { CodexCollaborationState } from '@hapi/protocol/types'
 import type { ConversationStatus } from '@/realtime/types'
 import { getContextBudgetTokens } from '@/chat/modelConfig'
 import { useTranslation } from '@/lib/use-translation'
@@ -43,6 +44,7 @@ function getConnectionStatus(
     agentState: AgentState | null | undefined,
     voiceStatus: ConversationStatus | undefined,
     backgroundTaskCount: number,
+    codexCollaborationState: CodexCollaborationState | undefined,
     t: (key: string) => string
 ): { text: string; color: string; dotColor: string; isPulsing: boolean } {
     const hasPermissions = agentState?.requests && Object.keys(agentState.requests).length > 0
@@ -75,6 +77,15 @@ function getConnectionStatus(
         }
     }
 
+    if (codexCollaborationState?.status === 'collaborating') {
+        return {
+            text: 'collaborating…',
+            color: 'text-[#007AFF]',
+            dotColor: 'bg-[#007AFF]',
+            isPulsing: true
+        }
+    }
+
     if (thinking) {
         const vibingMessage = VIBING_MESSAGES[Math.floor(Math.random() * VIBING_MESSAGES.length)].toLowerCase() + '…'
         return {
@@ -91,6 +102,15 @@ function getConnectionStatus(
             color: 'text-[#007AFF]',
             dotColor: 'bg-[#007AFF]',
             isPulsing: true
+        }
+    }
+
+    if (codexCollaborationState?.status === 'completed') {
+        return {
+            text: 'collaboration complete',
+            color: 'text-[#34C759]',
+            dotColor: 'bg-[#34C759]',
+            isPulsing: false
         }
     }
 
@@ -126,13 +146,14 @@ export function StatusBar(props: {
     resolvedModel?: string | null
     permissionMode?: PermissionMode
     collaborationMode?: CodexCollaborationMode
+    codexCollaborationState?: CodexCollaborationState
     agentFlavor?: string | null
     voiceStatus?: ConversationStatus
 }) {
     const { t } = useTranslation()
     const connectionStatus = useMemo(
-        () => getConnectionStatus(props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount ?? 0, t),
-        [props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount, t]
+        () => getConnectionStatus(props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount ?? 0, props.codexCollaborationState, t),
+        [props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount, props.codexCollaborationState, t]
     )
 
     const contextWarning = useMemo(

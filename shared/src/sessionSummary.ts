@@ -1,4 +1,4 @@
-import type { Session, WorktreeMetadata } from './schemas'
+import type { CodexCollaborationState, Session, WorktreeMetadata } from './schemas'
 
 export type SessionSummaryMetadata = {
     name?: string
@@ -21,6 +21,7 @@ export type SessionSummary = {
     pendingRequestsCount: number
     model: string | null
     effort: string | null
+    codexCollaborationState?: CodexCollaborationState
 }
 
 export function toSessionSummary(session: Session): SessionSummary {
@@ -56,6 +57,7 @@ export function toSessionSummary(session: Session): SessionSummary {
         todoProgress,
         pendingRequestsCount,
         model: session.model,
-        effort: session.effort
+        effort: session.effort,
+        codexCollaborationState: session.codexCollaborationState
     }
 }

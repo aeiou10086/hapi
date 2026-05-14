@@ -13,6 +13,7 @@ import type { CodexSession } from './session';
 import type { EnhancedMode } from './loop';
 import { hasCodexCliOverrides } from './utils/codexCliOverrides';
 import { AppServerEventConverter } from './utils/appServerEventConverter';
+import { CodexCollaborationStateTracker, type CodexCollaborationEvent, type CodexThreadStatusEvent } from './utils/collaborationState';
 import { registerAppServerPermissionHandlers } from './utils/appServerPermissionAdapter';
 import { buildThreadStartParams, buildTurnStartParams } from './utils/appServerConfig';
 import { shouldIgnoreTerminalEvent } from './utils/terminalEventGuard';
@@ -118,6 +119,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         const messageBuffer = this.messageBuffer;
         const appServerClient = this.appServerClient;
         const appServerEventConverter = new AppServerEventConverter();
+        const collaborationStateTracker = new CodexCollaborationStateTracker();
 
         const normalizeCommand = (value: unknown): string | undefined => {
             if (typeof value === 'string') {
@@ -333,6 +335,20 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             } else if (msgType === 'task_failed') {
                 const error = asString(msg.error);
                 messageBuffer.addMessage(error ? `Task failed: ${error}` : 'Task failed', 'status');
+            } else if (msgType === 'codex_collaboration') {
+                const collaborationState = collaborationStateTracker.applyEvent({
+                    ...(msg as CodexCollaborationEvent),
+                    time: Date.now()
+                });
+                session.setCodexCollaborationState(collaborationState);
+            } else if (msgType === 'codex_thread_status') {
+                const collaborationState = collaborationStateTracker.applyThreadStatus({
+                    ...(msg as CodexThreadStatusEvent),
+                    time: Date.now()
+                });
+                if (collaborationState) {
+                    session.setCodexCollaborationState(collaborationState);
+                }
             }
 
             if (msgType === 'task_started') {
