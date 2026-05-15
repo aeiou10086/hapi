@@ -8,7 +8,9 @@ const harness = vi.hoisted(() => ({
     initializeCalls: [] as unknown[],
     turnStartedIncludesId: false,
     turnCompletedIncludesId: false,
-    startTurnReturnsId: false
+    startTurnReturnsId: false,
+    emitCollaborationBeforeComplete: false,
+    emitChildTurnLifecycleDuringParent: false
 }));
 
 vi.mock('./codexAppServerClient', () => {
@@ -40,11 +42,40 @@ vi.mock('./codexAppServerClient', () => {
 
         async startTurn(): Promise<{ turn: { id?: string } }> {
             const turnId = 'turn-current';
-            const started = { turn: harness.turnStartedIncludesId ? { id: turnId } : {} };
+            const started = { threadId: 'thread-anonymous', turn: harness.turnStartedIncludesId ? { id: turnId } : {} };
             harness.notifications.push({ method: 'turn/started', params: started });
             this.notificationHandler?.('turn/started', started);
 
-            const completed = { status: 'Completed', turn: harness.turnCompletedIncludesId ? { id: turnId } : {} };
+            if (harness.emitChildTurnLifecycleDuringParent) {
+                const childStarted = { threadId: 'child-thread', turn: { id: 'child-turn' } };
+                harness.notifications.push({ method: 'turn/started', params: childStarted });
+                this.notificationHandler?.('turn/started', childStarted);
+
+                const childCompleted = { threadId: 'child-thread', status: 'Completed', turn: { id: 'child-turn' } };
+                harness.notifications.push({ method: 'turn/completed', params: childCompleted });
+                this.notificationHandler?.('turn/completed', childCompleted);
+            }
+
+            if (harness.emitCollaborationBeforeComplete) {
+                const collaboration = {
+                    item: {
+                        id: 'collab-1',
+                        type: 'collabAgentToolCall',
+                        status: 'completed',
+                        receiverThreadIds: ['child-thread'],
+                        agentsStates: {
+                            'child-thread': {
+                                status: 'notLoaded',
+                                message: 'Status: completed.'
+                            }
+                        }
+                    }
+                };
+                harness.notifications.push({ method: 'item/completed', params: collaboration });
+                this.notificationHandler?.('item/completed', collaboration);
+            }
+
+            const completed = { threadId: 'thread-anonymous', status: 'Completed', turn: harness.turnCompletedIncludesId ? { id: turnId } : {} };
             harness.notifications.push({ method: 'turn/completed', params: completed });
             this.notificationHandler?.('turn/completed', completed);
 
@@ -92,6 +123,7 @@ function createSessionStub() {
     const sessionEvents: Array<{ type: string; [key: string]: unknown }> = [];
     const codexMessages: unknown[] = [];
     const thinkingChanges: boolean[] = [];
+    const collaborationStates: unknown[] = [];
     const foundSessionIds: string[] = [];
     let currentModel: string | null | undefined;
     let agentState: FakeAgentState = {
@@ -144,6 +176,9 @@ function createSessionStub() {
             session.sessionId = id;
             foundSessionIds.push(id);
         },
+        setCodexCollaborationState(state: unknown) {
+            collaborationStates.push(state);
+        },
         sendAgentMessage(message: unknown) {
             client.sendAgentMessage(message);
         },
@@ -161,6 +196,7 @@ function createSessionStub() {
         codexMessages,
         thinkingChanges,
         foundSessionIds,
+        collaborationStates,
         rpcHandlers,
         getModel: () => currentModel,
         getAgentState: () => agentState
@@ -175,6 +211,8 @@ describe('codexRemoteLauncher', () => {
         harness.turnStartedIncludesId = false;
         harness.turnCompletedIncludesId = false;
         harness.startTurnReturnsId = false;
+        harness.emitCollaborationBeforeComplete = false;
+        harness.emitChildTurnLifecycleDuringParent = false;
     });
 
     it('finishes a turn and emits ready when task lifecycle events omit turn_id', async () => {
@@ -222,6 +260,40 @@ describe('codexRemoteLauncher', () => {
         expect(exitReason).toBe('exit');
         expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
         expect(thinkingChanges).toContain(true);
+        expect(session.thinking).toBe(false);
+    });
+
+    it('clears transient collaboration state when the turn completes', async () => {
+        harness.emitCollaborationBeforeComplete = true;
+
+        const {
+            session,
+            collaborationStates
+        } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        expect(collaborationStates.at(-1)).toMatchObject({
+            status: 'idle',
+            active: false,
+            childThreadCount: 0
+        });
+    });
+
+    it('keeps thinking active when a child thread completes before the parent turn', async () => {
+        harness.turnStartedIncludesId = true;
+        harness.turnCompletedIncludesId = true;
+        harness.startTurnReturnsId = true;
+        harness.emitChildTurnLifecycleDuringParent = true;
+
+        const {
+            session,
+            thinkingChanges
+        } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        expect(thinkingChanges).toEqual([true, false]);
         expect(session.thinking).toBe(false);
     });
 });

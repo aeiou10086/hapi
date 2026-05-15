@@ -19,11 +19,11 @@ describe('AppServerEventConverter', () => {
     it('maps turn/started and completed statuses', () => {
         const converter = new AppServerEventConverter();
 
-        const started = converter.handleNotification('turn/started', { turn: { id: 'turn-1' } });
-        expect(started).toEqual([{ type: 'task_started', turn_id: 'turn-1' }]);
+        const started = converter.handleNotification('turn/started', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        expect(started).toEqual([{ type: 'task_started', turn_id: 'turn-1', thread_id: 'thread-1' }]);
 
-        const completed = converter.handleNotification('turn/completed', { turn: { id: 'turn-1' }, status: 'Completed' });
-        expect(completed).toEqual([{ type: 'task_complete', turn_id: 'turn-1' }]);
+        const completed = converter.handleNotification('turn/completed', { threadId: 'thread-1', turn: { id: 'turn-1' }, status: 'Completed' });
+        expect(completed).toEqual([{ type: 'task_complete', turn_id: 'turn-1', thread_id: 'thread-1' }]);
 
         const interrupted = converter.handleNotification('turn/completed', { turn: { id: 'turn-1' }, status: 'Interrupted' });
         expect(interrupted).toEqual([{ type: 'turn_aborted', turn_id: 'turn-1' }]);

@@ -42,7 +42,14 @@ describe('CodexCollaborationStateTracker', () => {
             active: true,
             activeCallCount: 0,
             childThreadCount: 1,
-            lastEventAt: 150
+            lastEventAt: 150,
+            childThreads: [
+                {
+                    threadId: 'child-thread',
+                    status: 'pendingInit',
+                    active: true
+                }
+            ]
         });
 
         const completed = tracker.applyEvent({
@@ -63,6 +70,14 @@ describe('CodexCollaborationStateTracker', () => {
             active: false,
             activeCallCount: 0,
             childThreadCount: 1,
+            childThreads: [
+                {
+                    threadId: 'child-thread',
+                    status: 'completed',
+                    message: 'DONE',
+                    active: false
+                }
+            ],
             lastEventAt: 200,
             completedAt: 200
         });
@@ -95,8 +110,58 @@ describe('CodexCollaborationStateTracker', () => {
             active: false,
             activeCallCount: 0,
             childThreadCount: 1,
+            childThreads: [
+                {
+                    threadId: 'child-thread',
+                    status: 'completed',
+                    active: false
+                }
+            ],
             lastEventAt: 150,
             completedAt: 150
         });
+    });
+
+    it('resets completed child thread history before a new task starts', () => {
+        const tracker = new CodexCollaborationStateTracker();
+
+        tracker.applyEvent({
+            type: 'codex_collaboration',
+            call_id: 'wait-1',
+            status: 'completed',
+            receiver_thread_ids: ['old-child'],
+            agents_states: {
+                'old-child': { status: 'completed', message: 'Old result' }
+            },
+            time: 100
+        });
+
+        expect(tracker.reset(150)).toEqual({
+            status: 'idle',
+            active: false,
+            activeCallCount: 0,
+            childThreadCount: 0,
+            childThreads: [],
+            lastEventAt: 150
+        });
+
+        const next = tracker.applyEvent({
+            type: 'codex_collaboration',
+            call_id: 'spawn-2',
+            status: 'completed',
+            receiver_thread_ids: ['new-child'],
+            agents_states: {
+                'new-child': { status: 'running' }
+            },
+            time: 200
+        });
+
+        expect(next.childThreads).toEqual([
+            {
+                threadId: 'new-child',
+                status: 'running',
+                active: true
+            }
+        ]);
     });
 });

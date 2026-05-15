@@ -142,11 +142,21 @@ export const TeamStateSchema = z.object({
 
 export type TeamState = z.infer<typeof TeamStateSchema>
 
+export const CodexCollaborationChildThreadSchema = z.object({
+    threadId: z.string(),
+    status: z.string().optional(),
+    message: z.string().nullable().optional(),
+    active: z.boolean()
+})
+
+export type CodexCollaborationChildThread = z.infer<typeof CodexCollaborationChildThreadSchema>
+
 export const CodexCollaborationStateSchema = z.object({
     status: z.enum(['idle', 'collaborating', 'completed']),
     active: z.boolean(),
     activeCallCount: z.number().int().nonnegative(),
     childThreadCount: z.number().int().nonnegative(),
+    childThreads: z.array(CodexCollaborationChildThreadSchema).optional(),
     lastEventAt: z.number(),
     completedAt: z.number().optional()
 })

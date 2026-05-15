@@ -289,7 +289,12 @@ export class AppServerEventConverter {
         if (method === 'turn/started') {
             const turn = asRecord(paramsRecord.turn) ?? paramsRecord;
             const turnId = asString(turn.turnId ?? turn.turn_id ?? turn.id);
-            events.push({ type: 'task_started', ...(turnId ? { turn_id: turnId } : {}) });
+            const threadId = asString(paramsRecord.threadId ?? paramsRecord.thread_id ?? turn.threadId ?? turn.thread_id);
+            events.push({
+                type: 'task_started',
+                ...(turnId ? { turn_id: turnId } : {}),
+                ...(threadId ? { thread_id: threadId } : {})
+            });
             return events;
         }
 
@@ -298,19 +303,33 @@ export class AppServerEventConverter {
             const statusRaw = asString(paramsRecord.status ?? turn.status);
             const status = statusRaw?.toLowerCase();
             const turnId = asString(turn.turnId ?? turn.turn_id ?? turn.id);
+            const threadId = asString(paramsRecord.threadId ?? paramsRecord.thread_id ?? turn.threadId ?? turn.thread_id);
             const errorMessage = asString(paramsRecord.error ?? paramsRecord.message ?? paramsRecord.reason);
 
             if (status === 'interrupted' || status === 'cancelled' || status === 'canceled') {
-                events.push({ type: 'turn_aborted', ...(turnId ? { turn_id: turnId } : {}) });
+                events.push({
+                    type: 'turn_aborted',
+                    ...(turnId ? { turn_id: turnId } : {}),
+                    ...(threadId ? { thread_id: threadId } : {})
+                });
                 return events;
             }
 
             if (status === 'failed' || status === 'error') {
-                events.push({ type: 'task_failed', ...(turnId ? { turn_id: turnId } : {}), ...(errorMessage ? { error: errorMessage } : {}) });
+                events.push({
+                    type: 'task_failed',
+                    ...(turnId ? { turn_id: turnId } : {}),
+                    ...(threadId ? { thread_id: threadId } : {}),
+                    ...(errorMessage ? { error: errorMessage } : {})
+                });
                 return events;
             }
 
-            events.push({ type: 'task_complete', ...(turnId ? { turn_id: turnId } : {}) });
+            events.push({
+                type: 'task_complete',
+                ...(turnId ? { turn_id: turnId } : {}),
+                ...(threadId ? { thread_id: threadId } : {})
+            });
             return events;
         }
 

@@ -266,7 +266,22 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             const msgType = asString(msg.type);
             if (!msgType) return;
             const eventTurnId = asString(msg.turn_id ?? msg.turnId);
+            const eventThreadId = asString(msg.thread_id ?? msg.threadId);
             const isTerminalEvent = msgType === 'task_complete' || msgType === 'turn_aborted' || msgType === 'task_failed';
+            const isLifecycleEvent = msgType === 'task_started' || isTerminalEvent;
+            const isNonCurrentThreadLifecycle = isLifecycleEvent
+                && Boolean(eventThreadId)
+                && Boolean(this.currentThreadId)
+                && eventThreadId !== this.currentThreadId;
+
+            if (isNonCurrentThreadLifecycle) {
+                logger.debug(
+                    `[Codex] Ignoring ${msgType} lifecycle event for non-current thread; ` +
+                    `eventThread=${eventThreadId}, currentThread=${this.currentThreadId ?? 'none'}, ` +
+                    `eventTurnId=${eventTurnId ?? 'none'}, activeTurn=${this.currentTurnId ?? 'none'}`
+                );
+                return;
+            }
 
             if (msgType === 'thread_started') {
                 const threadId = asString(msg.thread_id ?? msg.threadId);
@@ -352,6 +367,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }
 
             if (msgType === 'task_started') {
+                session.setCodexCollaborationState(collaborationStateTracker.reset(Date.now()));
                 clearReadyAfterTurnTimer?.();
                 turnInFlight = true;
                 if (!eventTurnId && !this.currentTurnId) {
@@ -369,6 +385,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     logger.debug('thinking completed');
                     session.onThinkingChange(false);
                 }
+                session.setCodexCollaborationState(collaborationStateTracker.reset(Date.now()));
                 diffProcessor.reset();
                 appServerEventConverter.reset();
             }
@@ -914,7 +931,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     reasoningProcessor.abort();
                     diffProcessor.reset();
                     appServerEventConverter.reset();
-                    session.onThinkingChange(false);
+                    if (session.thinking) {
+                        session.onThinkingChange(false);
+                    }
                     clearReadyAfterTurnTimer?.();
                     emitReadyIfIdle({
                         pending,

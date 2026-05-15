@@ -11,6 +11,7 @@ import type { CodexCollaborationState } from '@hapi/protocol/types'
 import type { ConversationStatus } from '@/realtime/types'
 import { getContextBudgetTokens } from '@/chat/modelConfig'
 import { useTranslation } from '@/lib/use-translation'
+import { CollaborationPanel } from './CollaborationPanel'
 
 // Vibing messages for thinking state
 const VIBING_MESSAGES = [
@@ -105,15 +106,6 @@ function getConnectionStatus(
         }
     }
 
-    if (codexCollaborationState?.status === 'completed') {
-        return {
-            text: 'collaboration complete',
-            color: 'text-[#34C759]',
-            dotColor: 'bg-[#34C759]',
-            isPulsing: false
-        }
-    }
-
     return {
         text: t('misc.online'),
         color: 'text-[#34C759]',
@@ -184,35 +176,38 @@ export function StatusBar(props: {
         : null
 
     return (
-        <div className="flex items-center justify-between px-2 pb-1">
-            <div className="flex items-baseline gap-3">
-                <div className="flex items-center gap-1.5">
-                    <span
-                        className={`h-2 w-2 rounded-full ${connectionStatus.dotColor} ${connectionStatus.isPulsing ? 'animate-pulse' : ''}`}
-                    />
-                    <span className={`text-xs ${connectionStatus.color}`}>
-                        {connectionStatus.text}
-                    </span>
+        <div>
+            <div className="flex items-center justify-between px-2 pb-1">
+                <div className="flex items-baseline gap-3">
+                    <div className="flex items-center gap-1.5">
+                        <span
+                            className={`h-2 w-2 rounded-full ${connectionStatus.dotColor} ${connectionStatus.isPulsing ? 'animate-pulse' : ''}`}
+                        />
+                        <span className={`text-xs ${connectionStatus.color}`}>
+                            {connectionStatus.text}
+                        </span>
+                    </div>
+                    {contextWarning ? (
+                        <span className={`text-[10px] ${contextWarning.color}`}>
+                            {contextWarning.text}
+                        </span>
+                    ) : null}
                 </div>
-                {contextWarning ? (
-                    <span className={`text-[10px] ${contextWarning.color}`}>
-                        {contextWarning.text}
-                    </span>
-                ) : null}
-            </div>
 
-            <div className="flex items-center gap-2">
-                {collaborationModeLabel ? (
-                    <span className="text-xs text-blue-500">
-                        {collaborationModeLabel}
-                    </span>
-                ) : null}
-                {displayPermissionMode ? (
-                    <span className={`text-xs ${permissionModeColor}`}>
-                        {permissionModeLabel}
-                    </span>
-                ) : null}
+                <div className="flex items-center gap-2">
+                    {collaborationModeLabel ? (
+                        <span className="text-xs text-blue-500">
+                            {collaborationModeLabel}
+                        </span>
+                    ) : null}
+                    {displayPermissionMode ? (
+                        <span className={`text-xs ${permissionModeColor}`}>
+                            {permissionModeLabel}
+                        </span>
+                    ) : null}
+                </div>
             </div>
+            <CollaborationPanel state={props.codexCollaborationState} />
         </div>
     )
 }
