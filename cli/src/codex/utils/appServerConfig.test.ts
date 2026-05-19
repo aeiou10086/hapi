@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { buildThreadStartParams, buildTurnStartParams } from './appServerConfig';
-import { codexSystemPrompt } from './systemPrompt';
 
 describe('appServerConfig', () => {
     const mcpServers = { hapi: { command: 'node', args: ['mcp'] } };
@@ -16,14 +15,11 @@ describe('appServerConfig', () => {
         expect(params.cwd).toBe('/workspace/project');
         expect(params.sandbox).toBe('danger-full-access');
         expect(params.approvalPolicy).toBe('never');
-        expect(params.baseInstructions).toBe(codexSystemPrompt);
-        expect(params.developerInstructions).toBe(codexSystemPrompt);
         expect(params.config).toEqual({
             'mcp_servers.hapi': {
                 command: 'node',
                 args: ['mcp']
-            },
-            developer_instructions: codexSystemPrompt
+            }
         });
     });
 
@@ -61,7 +57,7 @@ describe('appServerConfig', () => {
         expect(params.approvalPolicy).toBe('on-failure');
     });
 
-    it('concatenates custom developer instructions after base instructions', () => {
+    it('does not pass developer instructions to app-server thread config', () => {
         const params = buildThreadStartParams({
             cwd: '/workspace/project',
             mode: { permissionMode: 'default', collaborationMode: 'default' },
@@ -69,14 +65,13 @@ describe('appServerConfig', () => {
             developerInstructions: 'Only respond in Chinese.'
         });
 
-        expect(params.baseInstructions).toBe(codexSystemPrompt);
-        expect(params.developerInstructions).toBe(`${codexSystemPrompt}\n\nOnly respond in Chinese.`);
+        expect(params.baseInstructions).toBeUndefined();
+        expect(params.developerInstructions).toBeUndefined();
         expect(params.config).toEqual({
             'mcp_servers.hapi': {
                 command: 'node',
                 args: ['mcp']
-            },
-            developer_instructions: `${codexSystemPrompt}\n\nOnly respond in Chinese.`
+            }
         });
     });
 
@@ -92,7 +87,6 @@ describe('appServerConfig', () => {
                 command: 'node',
                 args: ['mcp']
             },
-            developer_instructions: codexSystemPrompt,
             model_reasoning_effort: 'xhigh'
         });
     });
@@ -115,15 +109,8 @@ describe('appServerConfig', () => {
         expect(params.input).toEqual([{ type: 'text', text: 'hello' }]);
         expect(params.approvalPolicy).toBe('never');
         expect(params.sandboxPolicy).toEqual({ type: 'readOnly' });
-        expect(params.collaborationMode).toEqual({
-            mode: 'default',
-            settings: {
-                model: 'o3',
-                reasoning_effort: 'high',
-                developer_instructions: codexSystemPrompt
-            }
-        });
-        expect(params.model).toBeUndefined();
+        expect(params.model).toBe('o3');
+        expect(params.collaborationMode).toBeUndefined();
     });
 
     it('puts collaboration mode in turn params with model settings', () => {
@@ -143,14 +130,13 @@ describe('appServerConfig', () => {
             mode: 'plan',
             settings: {
                 model: 'o3',
-                reasoning_effort: 'high',
-                developer_instructions: codexSystemPrompt
+                reasoning_effort: 'high'
             }
         });
         expect(params.model).toBeUndefined();
     });
 
-    it('carries custom developer instructions into collaboration mode settings', () => {
+    it('does not pass developer instructions to collaboration mode settings', () => {
         const params = buildTurnStartParams({
             threadId: 'thread-1',
             message: 'hello',
@@ -162,8 +148,7 @@ describe('appServerConfig', () => {
         expect(params.collaborationMode).toEqual({
             mode: 'plan',
             settings: {
-                model: 'o3',
-                developer_instructions: `${codexSystemPrompt}\n\nOnly respond in Chinese.`
+                model: 'o3'
             }
         });
     });
@@ -188,13 +173,8 @@ describe('appServerConfig', () => {
 
         expect(params.approvalPolicy).toBe('never');
         expect(params.sandboxPolicy).toEqual({ type: 'dangerFullAccess' });
-        expect(params.collaborationMode).toEqual({
-            mode: 'default',
-            settings: {
-                model: 'o3',
-                developer_instructions: codexSystemPrompt
-            }
-        });
+        expect(params.model).toBe('o3');
+        expect(params.collaborationMode).toBeUndefined();
     });
 
     it('ignores CLI overrides for turns when permission mode is not default', () => {
@@ -208,13 +188,8 @@ describe('appServerConfig', () => {
 
         expect(params.approvalPolicy).toBe('on-failure');
         expect(params.sandboxPolicy).toEqual({ type: 'workspaceWrite' });
-        expect(params.collaborationMode).toEqual({
-            mode: 'default',
-            settings: {
-                model: 'o3',
-                developer_instructions: codexSystemPrompt
-            }
-        });
+        expect(params.model).toBe('o3');
+        expect(params.collaborationMode).toBeUndefined();
     });
 
     it('prefers turn overrides', () => {
@@ -227,13 +202,7 @@ describe('appServerConfig', () => {
         });
 
         expect(params.approvalPolicy).toBe('on-request');
-        expect(params.collaborationMode).toEqual({
-            mode: 'default',
-            settings: {
-                model: 'gpt-5',
-                developer_instructions: codexSystemPrompt
-            }
-        });
-        expect(params.model).toBeUndefined();
+        expect(params.model).toBe('gpt-5');
+        expect(params.collaborationMode).toBeUndefined();
     });
 });

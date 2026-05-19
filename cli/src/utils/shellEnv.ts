@@ -40,15 +40,29 @@ export function getInteractiveShellEnv(): NodeJS.ProcessEnv {
   return cachedInteractiveShellEnv;
 }
 
-export function withInteractiveShellEnvFallback(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const shellEnv = getInteractiveShellEnv();
+export function mergeInteractiveShellEnv(
+  env: NodeJS.ProcessEnv,
+  shellEnv: NodeJS.ProcessEnv,
+  options: { overrideKeys?: readonly string[] } = {}
+): NodeJS.ProcessEnv {
+  const overrideKeys = new Set(options.overrideKeys ?? []);
   const merged: NodeJS.ProcessEnv = { ...env };
 
   for (const [key, value] of Object.entries(shellEnv)) {
-    if (!merged[key] && typeof value === 'string') {
+    if (typeof value !== 'string') {
+      continue;
+    }
+    if (!merged[key] || overrideKeys.has(key)) {
       merged[key] = value;
     }
   }
 
   return merged;
+}
+
+export function withInteractiveShellEnvFallback(
+  env: NodeJS.ProcessEnv = process.env,
+  options: { overrideKeys?: readonly string[] } = {}
+): NodeJS.ProcessEnv {
+  return mergeInteractiveShellEnv(env, getInteractiveShellEnv(), options);
 }

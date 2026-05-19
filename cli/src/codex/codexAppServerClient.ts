@@ -52,6 +52,16 @@ type PendingRequest = {
     cleanup: () => void;
 };
 
+const CODEX_APP_SERVER_REFRESH_ENV_KEYS = [
+    'CODEX_API_KEY',
+    'CODEX_BASE_URL',
+    'CODEX_PROVIDER',
+    'OPENAI_API_KEY',
+    'OPENAI_BASE_URL',
+    'OPENAI_ORG_ID',
+    'OPENAI_PROJECT'
+];
+
 function asRecord(value: unknown): Record<string, unknown> | null {
     if (!value || typeof value !== 'object') {
         return null;
@@ -84,7 +94,9 @@ export class CodexAppServerClient {
 
         this.process = spawn('codex', ['app-server'], {
             env: (() => {
-                const env = withInteractiveShellEnvFallback(process.env);
+                const env = withInteractiveShellEnvFallback(process.env, {
+                    overrideKeys: CODEX_APP_SERVER_REFRESH_ENV_KEYS
+                });
                 return Object.keys(env).reduce((acc, key) => {
                     const value = env[key];
                     if (typeof value === 'string') acc[key] = value;

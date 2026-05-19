@@ -1,7 +1,6 @@
 import type { EnhancedMode } from '../loop';
 import type { CodexCliOverrides } from './codexCliOverrides';
 import type { McpServersConfig } from './buildHapiMcpBridge';
-import { codexSystemPrompt } from './systemPrompt';
 import type {
     ApprovalPolicy,
     SandboxMode,
@@ -49,20 +48,6 @@ function buildMcpServerConfig(mcpServers: McpServersConfig): Record<string, unkn
     return config;
 }
 
-function resolveInstructions(args: {
-    baseInstructions?: string;
-    developerInstructions?: string;
-}): { baseInstructions: string; developerInstructions: string } {
-    const baseInstructions = args.baseInstructions ?? codexSystemPrompt;
-    const developerInstructions = args.developerInstructions
-        ? `${baseInstructions}\n\n${args.developerInstructions}`
-        : baseInstructions;
-    return {
-        baseInstructions,
-        developerInstructions
-    };
-}
-
 export function buildThreadStartParams(args: {
     cwd: string;
     mode: EnhancedMode;
@@ -79,13 +64,8 @@ export function buildThreadStartParams(args: {
     const resolvedSandbox = cliOverrides?.sandbox ?? sandbox;
 
     const config = buildMcpServerConfig(args.mcpServers);
-    const {
-        baseInstructions,
-        developerInstructions: resolvedDeveloperInstructions
-    } = resolveInstructions(args);
     const configWithInstructions = {
         ...config,
-        developer_instructions: resolvedDeveloperInstructions,
         ...(args.mode.modelReasoningEffort ? { model_reasoning_effort: args.mode.modelReasoningEffort } : {})
     };
 
@@ -93,8 +73,6 @@ export function buildThreadStartParams(args: {
         cwd: args.cwd,
         approvalPolicy: resolvedApprovalPolicy,
         sandbox: resolvedSandbox,
-        baseInstructions,
-        developerInstructions: resolvedDeveloperInstructions,
         ...(Object.keys(configWithInstructions).length > 0 ? { config: configWithInstructions } : {})
     };
 
@@ -143,17 +121,15 @@ export function buildTurnStartParams(args: {
 
     const collaborationMode = args.mode?.collaborationMode;
     const model = args.overrides?.model ?? args.mode?.model;
-    if (collaborationMode) {
+    if (collaborationMode === 'plan') {
         if (!model) {
             throw new Error(`Collaboration mode '${collaborationMode}' requires a resolved model`);
         }
-        const { developerInstructions } = resolveInstructions(args);
         params.collaborationMode = {
             mode: collaborationMode,
             settings: {
                 model,
-                ...(args.mode?.modelReasoningEffort ? { reasoning_effort: args.mode.modelReasoningEffort } : {}),
-                developer_instructions: developerInstructions
+                ...(args.mode?.modelReasoningEffort ? { reasoning_effort: args.mode.modelReasoningEffort } : {})
             }
         };
     } else if (model) {
