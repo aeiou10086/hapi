@@ -113,7 +113,7 @@ describe('update_plan tool presentation', () => {
             metadata: null
         })
 
-        expect(presentation.title).toBe('Plan')
+        expect(presentation.title).toBe('Updated Plan')
         expect(presentation.subtitle).toBe('2 steps')
         expect(presentation.minimal).toBe(false)
     })
@@ -129,6 +129,42 @@ describe('update_plan tool presentation', () => {
         })
 
         expect(presentation.subtitle).toBeNull()
+        expect(presentation.minimal).toBe(true)
+    })
+})
+
+describe('Codex command tool presentation', () => {
+    it('shows exec_command as a ran command with the command text', () => {
+        const presentation = getToolPresentation({
+            toolName: 'exec_command',
+            input: {
+                cmd: 'uv run pytest tests/qsystem/test_capital_source_discovery_plan.py -q'
+            },
+            result: undefined,
+            childrenCount: 0,
+            description: null,
+            metadata: null
+        })
+
+        expect(presentation.title).toBe('Ran')
+        expect(presentation.subtitle).toBe('uv run pytest tests/qsystem/test_capital_source_discovery_plan.py -q')
+        expect(presentation.minimal).toBe(true)
+    })
+
+    it('shows CodexBash as a ran command with the command text', () => {
+        const presentation = getToolPresentation({
+            toolName: 'CodexBash',
+            input: {
+                command: 'bun run test src/codex/utils/codexEventConverter.test.ts'
+            },
+            result: undefined,
+            childrenCount: 0,
+            description: null,
+            metadata: null
+        })
+
+        expect(presentation.title).toBe('Ran')
+        expect(presentation.subtitle).toBe('bun run test src/codex/utils/codexEventConverter.test.ts')
         expect(presentation.minimal).toBe(true)
     })
 })

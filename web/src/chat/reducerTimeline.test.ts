@@ -180,6 +180,38 @@ describe('reduceTimeline', () => {
         expect(textBlocks).toHaveLength(1)
     })
 
+    it('infers an orphan Codex plan result as an update_plan tool block', () => {
+        const msg: TracedMessage = {
+            id: 'msg-plan-result',
+            localId: null,
+            createdAt: 1_700_000_000_000,
+            role: 'agent',
+            isSidechain: false,
+            content: [{
+                type: 'tool-result',
+                tool_use_id: 'call-plan',
+                content: 'Plan updated',
+                is_error: false,
+                uuid: 'result-uuid',
+                parentUUID: null
+            }]
+        } as TracedMessage
+
+        const { blocks } = reduceTimeline([msg], makeContext())
+
+        expect(blocks).toHaveLength(1)
+        expect(blocks[0]).toMatchObject({
+            kind: 'tool-call',
+            tool: {
+                id: 'call-plan',
+                name: 'update_plan',
+                input: {},
+                result: 'Plan updated',
+                state: 'completed'
+            }
+        })
+    })
+
     it('extracts task-notification summary as event from sidechain block', () => {
         const msg: TracedMessage = {
             id: 'msg-notif',

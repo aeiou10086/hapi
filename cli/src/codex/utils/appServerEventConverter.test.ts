@@ -141,6 +141,57 @@ describe('AppServerEventConverter', () => {
         }]);
     });
 
+    it('maps wrapped Codex exec_command function calls to command begin events', () => {
+        const converter = new AppServerEventConverter();
+
+        const events = converter.handleNotification('codex/event/response_item', {
+            msg: {
+                type: 'response_item',
+                payload: {
+                    type: 'function_call',
+                    name: 'exec_command',
+                    call_id: 'call-exec',
+                    arguments: '{"cmd":"uv run pytest tests/foo.py -q","workdir":"/tmp/project","yield_time_ms":10000}'
+                }
+            }
+        });
+
+        expect(events).toEqual([{
+            type: 'exec_command_begin',
+            call_id: 'call-exec',
+            cmd: 'uv run pytest tests/foo.py -q',
+            command: 'uv run pytest tests/foo.py -q',
+            workdir: '/tmp/project',
+            cwd: '/tmp/project',
+            yield_time_ms: 10000
+        }]);
+    });
+
+    it('maps wrapped Codex update_plan function calls to generic tool calls', () => {
+        const converter = new AppServerEventConverter();
+
+        const events = converter.handleNotification('codex/event/response_item', {
+            msg: {
+                type: 'response_item',
+                payload: {
+                    type: 'function_call',
+                    name: 'update_plan',
+                    call_id: 'call-plan',
+                    arguments: '{"plan":[{"step":"Ship fix","status":"in_progress"}]}'
+                }
+            }
+        });
+
+        expect(events).toEqual([{
+            type: 'tool_call',
+            call_id: 'call-plan',
+            name: 'update_plan',
+            input: {
+                plan: [{ step: 'Ship fix', status: 'in_progress' }]
+            }
+        }]);
+    });
+
     it('maps Codex collaboration agent tool calls', () => {
         const converter = new AppServerEventConverter();
 

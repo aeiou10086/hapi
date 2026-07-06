@@ -4,6 +4,13 @@ import { createCliOutputBlock, isCliOutputText, mergeCliOutputBlocks } from '@/c
 import { parseMessageAsEvent } from '@/chat/reducerEvents'
 import { ensureToolBlock, extractTitleFromChangeTitleInput, isChangeTitleToolName, type PermissionEntry } from '@/chat/reducerTools'
 
+function inferOrphanToolResult(content: unknown): { name: string; input: unknown } | null {
+    if (content === 'Plan updated') {
+        return { name: 'update_plan', input: {} }
+    }
+    return null
+}
+
 export function reduceTimeline(
     messages: TracedMessage[],
     context: {
@@ -247,6 +254,7 @@ export function reduceTimeline(
                     }
 
                     const permissionEntry = context.permissionsById.get(c.tool_use_id)
+                    const inferredTool = permissionEntry ? null : inferOrphanToolResult(c.content)
                     const permissionFromResult = c.permissions ? ({
                         id: c.tool_use_id,
                         status: c.permissions.result === 'approved' ? 'approved' : 'denied',
@@ -272,8 +280,8 @@ export function reduceTimeline(
                         createdAt: msg.createdAt,
                         localId: msg.localId,
                         meta: msg.meta,
-                        name: permissionEntry?.toolName ?? 'Tool',
-                        input: permissionEntry?.input ?? null,
+                        name: permissionEntry?.toolName ?? inferredTool?.name ?? 'Tool',
+                        input: permissionEntry?.input ?? inferredTool?.input ?? null,
                         description: null,
                         permission
                     })

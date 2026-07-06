@@ -75,6 +75,28 @@ describe('convertCodexEvent', () => {
         });
     });
 
+    it('preserves exec_command arguments as tool input', () => {
+        const result = convertCodexEvent({
+            type: 'response_item',
+            payload: {
+                type: 'function_call',
+                name: 'exec_command',
+                call_id: 'call-exec',
+                arguments: '{"cmd":"uv run pytest tests/qsystem/test_plan.py -q","workdir":"/tmp/project"}'
+            }
+        });
+
+        expect(result?.message).toMatchObject({
+            type: 'tool-call',
+            name: 'exec_command',
+            callId: 'call-exec',
+            input: {
+                cmd: 'uv run pytest tests/qsystem/test_plan.py -q',
+                workdir: '/tmp/project'
+            }
+        });
+    });
+
     it('converts function_call_output items', () => {
         const result = convertCodexEvent({
             type: 'response_item',

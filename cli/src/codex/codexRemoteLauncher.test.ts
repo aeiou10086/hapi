@@ -23,7 +23,8 @@ const harness = vi.hoisted(() => ({
     emitCollaborationBeforeComplete: false,
     emitChildTurnLifecycleDuringParent: false,
     emitChildMessageDuringCollab: false,
-    childCollaborationStatus: 'notLoaded'
+    childCollaborationStatus: 'notLoaded',
+    turnNotifications: [] as Array<{ method: string; params: unknown }>
 }));
 
 vi.mock('./codexAppServerClient', () => {
@@ -60,6 +61,11 @@ vi.mock('./codexAppServerClient', () => {
             const started = { threadId: 'thread-anonymous', turn: harness.turnStartedIncludesId ? { id: turnId } : {} };
             harness.notifications.push({ method: 'turn/started', params: started });
             this.notificationHandler?.('turn/started', started);
+
+            for (const notification of harness.turnNotifications) {
+                harness.notifications.push(notification);
+                this.notificationHandler?.(notification.method, notification.params);
+            }
 
             if (harness.emitChildTurnLifecycleDuringParent) {
                 const childStarted = { threadId: 'child-thread', turn: { id: 'child-turn' } };
@@ -284,6 +290,7 @@ describe('codexRemoteLauncher', () => {
         harness.emitChildTurnLifecycleDuringParent = false;
         harness.emitChildMessageDuringCollab = false;
         harness.childCollaborationStatus = 'notLoaded';
+        harness.turnNotifications = [];
     });
 
     it('finishes a turn and emits ready when task lifecycle events omit turn_id', async () => {
@@ -478,6 +485,79 @@ describe('codexRemoteLauncher', () => {
                 state: expect.objectContaining({
                     status: 'completed',
                     childThreadCount: 1
+                })
+            })
+        ]));
+    });
+
+    it('surfaces wrapped Codex function calls as tool-call messages with input', async () => {
+        harness.turnNotifications = [{
+            method: 'codex/event/response_item',
+            params: {
+                msg: {
+                    type: 'response_item',
+                    payload: {
+                        type: 'function_call',
+                        name: 'update_plan',
+                        call_id: 'call-plan',
+                        arguments: '{"plan":[{"step":"Ship fix","status":"in_progress"}]}'
+                    }
+                }
+            }
+        }];
+
+        const {
+            session,
+            codexMessages
+        } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        expect(codexMessages).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'tool-call',
+                name: 'update_plan',
+                callId: 'call-plan',
+                input: {
+                    plan: [{ step: 'Ship fix', status: 'in_progress' }]
+                }
+            })
+        ]));
+    });
+
+    it('surfaces wrapped Codex exec_command calls as CodexBash tool-call messages with command input', async () => {
+        harness.turnNotifications = [{
+            method: 'codex/event/response_item',
+            params: {
+                msg: {
+                    type: 'response_item',
+                    payload: {
+                        type: 'function_call',
+                        name: 'exec_command',
+                        call_id: 'call-exec',
+                        arguments: '{"cmd":"pwd","workdir":"/tmp/hapi-update"}'
+                    }
+                }
+            }
+        }];
+
+        const {
+            session,
+            codexMessages
+        } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        expect(codexMessages).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'tool-call',
+                name: 'CodexBash',
+                callId: 'call-exec',
+                input: expect.objectContaining({
+                    cmd: 'pwd',
+                    command: 'pwd',
+                    workdir: '/tmp/hapi-update',
+                    cwd: '/tmp/hapi-update'
                 })
             })
         ]));

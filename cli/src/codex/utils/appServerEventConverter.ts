@@ -72,6 +72,23 @@ function extractCommand(value: unknown): string | null {
     return null;
 }
 
+function parseFunctionArguments(value: unknown): unknown {
+    if (typeof value !== 'string') {
+        return value;
+    }
+
+    const trimmed = value.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+            return JSON.parse(trimmed);
+        } catch (error) {
+            logger.debug('[AppServerEventConverter] Failed to parse function_call arguments as JSON:', error);
+        }
+    }
+
+    return value;
+}
+
 function extractChanges(value: unknown): Record<string, unknown> | null {
     if (Array.isArray(value)) {
         const changes: Record<string, unknown> = {};
@@ -222,6 +239,51 @@ export class AppServerEventConverter {
                 thread_id: threadId,
                 ...(turnId ? { turn_id: turnId } : {})
             }];
+        }
+
+        if (msgType === 'response_item') {
+            const payload = asRecord(msg.payload);
+            const payloadType = asString(payload?.type);
+
+            if (payloadType === 'function_call' && payload) {
+                const name = asString(payload.name);
+                const callId = asString(payload.call_id ?? payload.callId ?? payload.tool_call_id ?? payload.toolCallId ?? payload.id);
+                if (!name || !callId) return [];
+
+                const input = parseFunctionArguments(payload.arguments);
+                const inputRecord = asRecord(input) ?? {};
+
+                if (name === 'exec_command') {
+                    const command = extractCommand(inputRecord.cmd ?? inputRecord.command);
+                    const cwd = asString(inputRecord.workdir ?? inputRecord.cwd);
+                    return [{
+                        type: 'exec_command_begin',
+                        call_id: callId,
+                        ...inputRecord,
+                        ...(command ? { command } : {}),
+                        ...(cwd ? { cwd } : {})
+                    }];
+                }
+
+                return [{
+                    type: 'tool_call',
+                    call_id: callId,
+                    name,
+                    input
+                }];
+            }
+
+            if (payloadType === 'function_call_output' && payload) {
+                const callId = asString(payload.call_id ?? payload.callId ?? payload.tool_call_id ?? payload.toolCallId ?? payload.id);
+                if (!callId) return [];
+                return [{
+                    type: 'tool_call_result',
+                    call_id: callId,
+                    output: payload.output
+                }];
+            }
+
+            return [];
         }
 
         if (msgType === 'agent_message_delta' || msgType === 'agent_message_content_delta') {

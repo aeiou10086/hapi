@@ -150,7 +150,7 @@ export const knownTools: Record<string, {
                     return resolveDisplayPath(parsed.name, opts.metadata)
                 }
             }
-            return opts.description ?? 'Terminal'
+            return opts.description ?? 'Ran'
         },
         subtitle: (opts) => {
             const command = getInputStringAny(opts.input, ['command', 'cmd'])
@@ -160,6 +160,12 @@ export const knownTools: Record<string, {
             }
             return null
         },
+        minimal: true
+    },
+    exec_command: {
+        icon: () => <TerminalIcon className={DEFAULT_ICON_CLASS} />,
+        title: (opts) => opts.description ?? 'Ran',
+        subtitle: (opts) => getInputStringAny(opts.input, ['cmd', 'command']),
         minimal: true
     },
     CodexPermission: {
@@ -274,7 +280,7 @@ export const knownTools: Record<string, {
     },
     update_plan: {
         icon: () => <ClipboardIcon className={DEFAULT_ICON_CLASS} />,
-        title: () => 'Plan',
+        title: () => 'Updated Plan',
         subtitle: (opts) => formatChecklistCount(extractUpdatePlanChecklist(opts.input, opts.result), 'step'),
         minimal: (opts) => extractUpdatePlanChecklist(opts.input, opts.result).length === 0
     },
