@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { CodexCollaborationMode, PermissionMode } from './modes'
-import type { CodexCollaborationState } from './schemas'
+import type { CodexCollaborationState, CodexGoalState } from './schemas'
 
 export type SocketErrorReason = 'namespace-missing' | 'access-denied' | 'not-found'
 
@@ -145,6 +145,7 @@ export interface ClientToServerEvents {
         effort?: string | null
         collaborationMode?: CodexCollaborationMode
         codexCollaborationState?: CodexCollaborationState
+        codexGoalState?: CodexGoalState
     }) => void
     'session-end': (data: { sid: string; time: number }) => void
     'update-metadata': (data: { sid: string; expectedVersion: number; metadata: unknown }, cb: (answer: {

@@ -13,6 +13,7 @@ export type CodexBuiltinSlashCommand =
     | { kind: 'new' }
     | { kind: 'undo'; numTurns: number }
     | { kind: 'diff' }
+    | { kind: 'goal'; action: 'show' | 'set' | 'clear' | 'pause' | 'resume'; objective?: string }
     | { kind: 'status' }
     | { kind: 'unsupported'; name: string; reason: string };
 
@@ -117,6 +118,26 @@ export function parseCodexBuiltinSlashCommand(text: string): CodexBuiltinSlashCo
         }
         case 'diff':
             return { kind: 'diff' };
+        case 'goal': {
+            const args = parsed.args.trim();
+            if (!args) {
+                return { kind: 'goal', action: 'show' };
+            }
+            if (args === 'clear') {
+                return { kind: 'goal', action: 'clear' };
+            }
+            if (args === 'pause' || args === 'resume') {
+                return { kind: 'goal', action: args };
+            }
+            if (args === 'edit') {
+                return {
+                    kind: 'unsupported',
+                    name: parsed.name,
+                    reason: `/goal edit is an interactive Codex TUI command that is not available in HAPI remote chat yet. Use /goal <objective>, /goal pause, /goal resume, or /goal clear.`
+                };
+            }
+            return { kind: 'goal', action: 'set', objective: args };
+        }
         case 'status':
             return { kind: 'status' };
         case 'model':

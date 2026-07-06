@@ -3,6 +3,7 @@ import { MarkdownText } from '@/components/assistant-ui/markdown-text'
 import { Reasoning, ReasoningGroup } from '@/components/assistant-ui/reasoning'
 import { HappyToolMessage } from '@/components/AssistantChat/messages/ToolMessage'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
+import { CollaborationPanel } from '@/components/AssistantChat/CollaborationPanel'
 import { CopyIcon, CheckIcon } from '@/components/icons'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
@@ -30,6 +31,12 @@ export function HappyAssistantMessage() {
         if (custom?.kind !== 'cli-output') return ''
         return message.content.find((part) => part.type === 'text')?.text ?? ''
     })
+    const collaborationState = useAssistantState(({ message }) => {
+        const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
+        return custom?.kind === 'codex-collaboration'
+            ? custom.codexCollaborationState
+            : undefined
+    })
     const toolOnly = useAssistantState(({ message }) => {
         if (message.role !== 'assistant') return false
         const parts = message.content
@@ -47,6 +54,14 @@ export function HappyAssistantMessage() {
         return (
             <MessagePrimitive.Root className="px-1 min-w-0 max-w-full overflow-x-hidden">
                 <CliOutputBlock text={cliText} />
+            </MessagePrimitive.Root>
+        )
+    }
+
+    if (collaborationState) {
+        return (
+            <MessagePrimitive.Root className="px-1 min-w-0 max-w-full overflow-x-hidden">
+                <CollaborationPanel state={collaborationState} variant="snapshot" />
             </MessagePrimitive.Root>
         )
     }

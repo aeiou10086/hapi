@@ -2,11 +2,12 @@ import {
     AgentStateSchema,
     AttachmentMetadataSchema,
     CodexCollaborationModeSchema,
+    CodexGoalStateSchema,
     MetadataSchema,
     PermissionModeSchema,
     TodosSchema
 } from '@hapi/protocol/schemas'
-import type { CodexCollaborationMode, CodexCollaborationState, PermissionMode } from '@hapi/protocol/types'
+import type { CodexCollaborationMode, CodexCollaborationState, CodexGoalState, PermissionMode } from '@hapi/protocol/types'
 import { z } from 'zod'
 import { UsageSchema } from '@/claude/types'
 
@@ -24,6 +25,7 @@ export type {
 export type SessionPermissionMode = PermissionMode
 export type SessionCollaborationMode = CodexCollaborationMode
 export type SessionCodexCollaborationState = CodexCollaborationState
+export type SessionCodexGoalState = CodexGoalState
 export type SessionModel = string | null
 export type SessionModelReasoningEffort = string | null
 export type SessionEffort = string | null
@@ -101,6 +103,7 @@ export const CreateSessionResponseSchema = z.object({
         thinking: z.boolean(),
         thinkingAt: z.number(),
         codexCollaborationState: z.unknown().optional(),
+        codexGoalState: CodexGoalStateSchema.optional(),
         todos: TodosSchema.optional(),
         model: z.string().nullable().optional().default(null),
         modelReasoningEffort: z.string().nullable().optional().default(null),

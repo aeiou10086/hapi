@@ -4,6 +4,7 @@ import type {
     Metadata,
     SessionCollaborationMode,
     SessionCodexCollaborationState,
+    SessionCodexGoalState,
     SessionEffort,
     SessionModel,
     SessionModelReasoningEffort,
@@ -53,6 +54,7 @@ export class AgentSessionBase<Mode> {
     protected effort?: SessionEffort;
     protected collaborationMode?: SessionCollaborationMode;
     protected codexCollaborationState?: SessionCodexCollaborationState;
+    protected codexGoalState?: SessionCodexGoalState;
 
     constructor(opts: AgentSessionBaseOptions<Mode>) {
         this.path = opts.path;
@@ -135,6 +137,7 @@ export class AgentSessionBase<Mode> {
             effort?: SessionEffort
             collaborationMode?: SessionCollaborationMode
             codexCollaborationState?: SessionCodexCollaborationState
+            codexGoalState?: SessionCodexGoalState
         } | undefined {
         if (
             this.permissionMode === undefined
@@ -143,6 +146,7 @@ export class AgentSessionBase<Mode> {
             && this.effort === undefined
             && this.collaborationMode === undefined
             && this.codexCollaborationState === undefined
+            && this.codexGoalState === undefined
         ) {
             return undefined;
         }
@@ -152,7 +156,8 @@ export class AgentSessionBase<Mode> {
             modelReasoningEffort: this.modelReasoningEffort,
             effort: this.effort,
             collaborationMode: this.collaborationMode,
-            codexCollaborationState: this.codexCollaborationState
+            codexCollaborationState: this.codexCollaborationState,
+            codexGoalState: this.codexGoalState
         };
     }
 
@@ -178,5 +183,9 @@ export class AgentSessionBase<Mode> {
 
     getCodexCollaborationState(): SessionCodexCollaborationState | undefined {
         return this.codexCollaborationState;
+    }
+
+    getCodexGoalState(): SessionCodexGoalState | undefined {
+        return this.codexGoalState;
     }
 }

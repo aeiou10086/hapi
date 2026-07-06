@@ -50,7 +50,6 @@ describe('registerAppServerPermissionHandlers', () => {
             itemId: 'tool-123',
             questions: [{ id: 'approve_nav', question: 'Approve app tool call?' }]
         })).resolves.toEqual({
-            decision: 'accept',
             answers: {
                 approve_nav: {
                     answers: ['Allow']

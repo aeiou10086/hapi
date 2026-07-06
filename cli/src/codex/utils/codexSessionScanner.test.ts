@@ -3,6 +3,7 @@ import { mkdir, writeFile, appendFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { createCodexSessionScanner } from './codexSessionScanner';
 import type { CodexSessionEvent } from './codexEventConverter';
 
@@ -202,6 +203,239 @@ describe('codexSessionScanner', () => {
         expect(events).toHaveLength(1);
         expect(events[0].type).toBe('response_item');
     });
+
+    it('adopts a reused older session file from an old date directory when fresh matching activity appears after startup', async () => {
+        const reusedSessionId = 'session-reused-old-date-file';
+        const targetCwd = '/data/github/happy/hapi';
+        const startupTimestampMs = Date.now();
+        const oldSessionsDir = join(testDir, 'sessions', '2025', '11', '10');
+        await mkdir(oldSessionsDir, { recursive: true });
+        sessionFile = join(oldSessionsDir, `codex-${reusedSessionId}.jsonl`);
+
+        await writeFile(
+            sessionFile,
+            JSON.stringify({
+                type: 'session_meta',
+                payload: {
+                    id: reusedSessionId,
+                    cwd: targetCwd,
+                    timestamp: new Date(startupTimestampMs - 10 * 60 * 1000).toISOString()
+                }
+            }) + '\n' +
+            JSON.stringify({
+                type: 'event_msg',
+                payload: { type: 'user_message', message: 'historical user message' }
+            }) + '\n' +
+            JSON.stringify({
+                type: 'event_msg',
+                payload: { type: 'agent_message', message: 'historical agent message' }
+            }) + '\n'
+        );
+
+        let matchedSessionId: string | null = null;
+        scanner = await createCodexSessionScanner({
+            sessionId: null,
+            cwd: targetCwd,
+            startupTimestampMs,
+            onEvent: (event) => events.push(event),
+            onSessionFound: (sessionId) => {
+                matchedSessionId = sessionId;
+            }
+        });
+
+        await wait(150);
+        expect(events).toHaveLength(0);
+        expect(matchedSessionId).toBeNull();
+
+        const newLine = JSON.stringify({
+            type: 'response_item',
+            payload: { type: 'function_call', name: 'Tool', call_id: 'call-reused-old-date', arguments: '{}' }
+        });
+        await appendFile(sessionFile, newLine + '\n');
+
+        await wait(2300);
+        expect(matchedSessionId).toBe(reusedSessionId);
+        expect(events.map((event) => event.type)).toEqual([
+            'event_msg',
+            'event_msg',
+            'response_item'
+        ]);
+        expect(events[0].payload).toMatchObject({ message: 'historical user message' });
+        expect(events[1].payload).toMatchObject({ message: 'historical agent message' });
+        expect(events[2].type).toBe('response_item');
+    });
+
+    it('keeps scanning for a manually resumed old session after the initial match deadline', async () => {
+        const reusedSessionId = 'session-resumed-after-timeout';
+        const targetCwd = '/data/github/happy/hapi';
+        const startupTimestampMs = Date.now();
+        const oldSessionsDir = join(testDir, 'sessions', '2025', '11', '10');
+        await mkdir(oldSessionsDir, { recursive: true });
+        sessionFile = join(oldSessionsDir, `codex-${reusedSessionId}.jsonl`);
+
+        await writeFile(
+            sessionFile,
+            JSON.stringify({
+                type: 'session_meta',
+                payload: {
+                    id: reusedSessionId,
+                    cwd: targetCwd,
+                    timestamp: new Date(startupTimestampMs - 10 * 60 * 1000).toISOString()
+                }
+            }) + '\n' +
+            JSON.stringify({
+                type: 'event_msg',
+                payload: { type: 'user_message', message: 'historical user message' }
+            }) + '\n'
+        );
+
+        let matchedSessionId: string | null = null;
+        let failureMessage: string | null = null;
+        scanner = await createCodexSessionScanner({
+            sessionId: null,
+            cwd: targetCwd,
+            startupTimestampMs,
+            sessionStartWindowMs: 100,
+            onEvent: (event) => events.push(event),
+            onSessionFound: (sessionId) => {
+                matchedSessionId = sessionId;
+            },
+            onSessionMatchFailed: (message) => {
+                failureMessage = message;
+            }
+        });
+
+        await wait(2500);
+        expect(failureMessage).toContain('No Codex session found within 100ms');
+        expect(matchedSessionId).toBeNull();
+        expect(events).toHaveLength(0);
+
+        const newLine = JSON.stringify({
+            type: 'response_item',
+            payload: { type: 'function_call', name: 'Tool', call_id: 'call-after-timeout', arguments: '{}' }
+        });
+        await appendFile(sessionFile, newLine + '\n');
+
+        await wait(2300);
+        expect(matchedSessionId).toBe(reusedSessionId);
+        expect(events.map((event) => event.type)).toEqual([
+            'event_msg',
+            'response_item'
+        ]);
+        expect(events[0].payload).toMatchObject({ message: 'historical user message' });
+        expect(events[1].type).toBe('response_item');
+    });
+
+    it('adopts a resumed old session from Codex state before transcript receives new events', async () => {
+        const resumedSessionId = 'session-resumed-from-state';
+        const targetCwd = '/data/github/happy/hapi';
+        const startupTimestampMs = Date.now();
+        const oldSessionsDir = join(testDir, 'sessions', '2025', '11', '10');
+        await mkdir(oldSessionsDir, { recursive: true });
+        sessionFile = join(oldSessionsDir, `codex-${resumedSessionId}.jsonl`);
+
+        await writeFile(
+            sessionFile,
+            JSON.stringify({
+                type: 'session_meta',
+                payload: {
+                    id: resumedSessionId,
+                    cwd: targetCwd,
+                    timestamp: new Date(startupTimestampMs - 10 * 60 * 1000).toISOString()
+                }
+            }) + '\n' +
+            JSON.stringify({
+                type: 'event_msg',
+                payload: { type: 'user_message', message: 'historical user message' }
+            }) + '\n' +
+            JSON.stringify({
+                type: 'event_msg',
+                payload: { type: 'agent_message', message: 'historical agent message' }
+            }) + '\n'
+        );
+
+        let matchedSessionId: string | null = null;
+        scanner = await createCodexSessionScanner({
+            sessionId: null,
+            cwd: targetCwd,
+            startupTimestampMs,
+            sessionStartWindowMs: 100,
+            onEvent: (event) => events.push(event),
+            onSessionFound: (sessionId) => {
+                matchedSessionId = sessionId;
+            }
+        });
+
+        await wait(2500);
+        expect(matchedSessionId).toBeNull();
+        expect(events).toHaveLength(0);
+
+        const stateDbPath = join(testDir, 'state_5.sqlite');
+        execFileSync('sqlite3', [
+            stateDbPath,
+            `
+                CREATE TABLE threads (
+                    id TEXT PRIMARY KEY,
+                    rollout_path TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    source TEXT NOT NULL,
+                    model_provider TEXT NOT NULL,
+                    cwd TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    sandbox_policy TEXT NOT NULL,
+                    approval_mode TEXT NOT NULL,
+                    tokens_used INTEGER NOT NULL DEFAULT 0,
+                    has_user_event INTEGER NOT NULL DEFAULT 0,
+                    archived INTEGER NOT NULL DEFAULT 0,
+                    created_at_ms INTEGER,
+                    updated_at_ms INTEGER,
+                    recency_at_ms INTEGER NOT NULL DEFAULT 0
+                );
+            `
+        ]);
+        const insertSql = `
+            INSERT INTO threads (
+                id,
+                rollout_path,
+                created_at,
+                updated_at,
+                source,
+                model_provider,
+                cwd,
+                title,
+                sandbox_policy,
+                approval_mode,
+                created_at_ms,
+                updated_at_ms,
+                recency_at_ms
+            ) VALUES (
+                '${resumedSessionId}',
+                '${sessionFile.replace(/'/g, "''")}',
+                ${Math.floor((startupTimestampMs - 10 * 60 * 1000) / 1000)},
+                ${Math.floor((startupTimestampMs + 500) / 1000)},
+                'codex',
+                'openai',
+                '${targetCwd}',
+                'resumed',
+                '{}',
+                'default',
+                ${startupTimestampMs - 10 * 60 * 1000},
+                ${startupTimestampMs + 500},
+                ${startupTimestampMs + 500}
+            );
+        `;
+        execFileSync('sqlite3', [stateDbPath, insertSql]);
+
+        await wait(2300);
+        expect(matchedSessionId).toBe(resumedSessionId);
+        expect(events.map((event) => event.type)).toEqual([
+            'event_msg',
+            'event_msg'
+        ]);
+        expect(events[0].payload).toMatchObject({ message: 'historical user message' });
+        expect(events[1].payload).toMatchObject({ message: 'historical agent message' });
+    }, 8000);
 
     it('does not adopt a reused session when first fresh matching activity is ambiguous', async () => {
         const targetCwd = '/data/github/happy/hapi';

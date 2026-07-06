@@ -3,7 +3,7 @@ import { Server, type DefaultEventsMap } from 'socket.io'
 import { jwtVerify } from 'jose'
 import { z } from 'zod'
 import type { Store } from '../store'
-import type { CodexCollaborationState } from '@hapi/protocol/types'
+import type { CodexCollaborationState, CodexGoalState } from '@hapi/protocol/types'
 import { configuration } from '../configuration'
 import { constantTimeEquals } from '../utils/crypto'
 import { parseAccessToken } from '../utils/accessToken'
@@ -37,7 +37,7 @@ export type SocketServerDeps = {
     corsOrigins?: string[]
     getSession?: (sessionId: string) => { active: boolean; namespace: string } | null
     onWebappEvent?: (event: SyncEvent) => void
-    onSessionAlive?: (payload: { sid: string; time: number; thinking?: boolean; mode?: 'local' | 'remote'; codexCollaborationState?: CodexCollaborationState }) => void
+    onSessionAlive?: (payload: { sid: string; time: number; thinking?: boolean; mode?: 'local' | 'remote'; codexCollaborationState?: CodexCollaborationState; codexGoalState?: CodexGoalState }) => void
     onSessionEnd?: (payload: { sid: string; time: number }) => void
     onMachineAlive?: (payload: { machineId: string; time: number }) => void
     onBackgroundTaskDelta?: (sessionId: string, delta: { started: number; completed: number }) => void

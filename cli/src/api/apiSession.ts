@@ -483,6 +483,7 @@ export class ApiSessionClient extends EventEmitter {
             effort?: string | null
             collaborationMode?: SessionCollaborationMode
             codexCollaborationState?: import('./types').SessionCodexCollaborationState
+            codexGoalState?: import('./types').SessionCodexGoalState
         }
     ): void {
         this.socket.volatile.emit('session-alive', {

@@ -36,7 +36,9 @@ function resolveSandboxPolicyOverride(value: CodexCliOverrides['sandbox'] | unde
 }
 
 function buildMcpServerConfig(mcpServers: McpServersConfig): Record<string, unknown> {
-    const config: Record<string, unknown> = {};
+    const config: Record<string, unknown> = {
+        'tools.experimental_request_user_input': {}
+    };
 
     for (const [name, server] of Object.entries(mcpServers)) {
         config[`mcp_servers.${name}`] = {

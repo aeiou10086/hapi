@@ -363,6 +363,24 @@ export function normalizeAgentRecord(
             }
         }
 
+        if (data.type === 'codex-collaboration-summary' && isObject(data.state)) {
+            const uuid = asString(data.id) ?? messageId
+            return {
+                id: messageId,
+                localId,
+                createdAt,
+                role: 'agent',
+                isSidechain: false,
+                content: [{
+                    type: 'codex-collaboration',
+                    state: data.state as never,
+                    uuid,
+                    parentUUID: null
+                }],
+                meta
+            }
+        }
+
         if (data.type === 'reasoning' && typeof data.message === 'string') {
             return {
                 id: messageId,

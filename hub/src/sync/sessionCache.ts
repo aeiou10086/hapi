@@ -1,5 +1,5 @@
 import { AgentStateSchema, MetadataSchema, TeamStateSchema } from '@hapi/protocol/schemas'
-import type { CodexCollaborationMode, CodexCollaborationState, PermissionMode, Session } from '@hapi/protocol/types'
+import type { CodexCollaborationMode, CodexCollaborationState, CodexGoalState, PermissionMode, Session } from '@hapi/protocol/types'
 import type { Store } from '../store'
 import { clampAliveTime } from './aliveTime'
 import { EventPublisher } from './eventPublisher'
@@ -9,6 +9,7 @@ import { extractBackgroundTaskDelta } from './backgroundTasks'
 export class SessionCache {
     private readonly sessions: Map<string, Session> = new Map()
     private readonly lastBroadcastAtBySessionId: Map<string, number> = new Map()
+    private readonly lastPersistedAliveAtBySessionId: Map<string, number> = new Map()
     private readonly todoBackfillAttemptedSessionIds: Set<string> = new Set()
     private readonly deduplicateInProgress: Set<string> = new Set()
 
@@ -136,6 +137,7 @@ export class SessionCache {
             thinkingAt: existing?.thinkingAt ?? 0,
             backgroundTaskCount: existing?.backgroundTaskCount ?? 0,
             codexCollaborationState: existing?.codexCollaborationState,
+            codexGoalState: existing?.codexGoalState,
             todos,
             teamState,
             model: stored.model,
@@ -168,6 +170,7 @@ export class SessionCache {
         effort?: string | null
         collaborationMode?: CodexCollaborationMode
         codexCollaborationState?: CodexCollaborationState
+        codexGoalState?: CodexGoalState
     }): void {
         const t = clampAliveTime(payload.time)
         if (!t) return
@@ -183,11 +186,19 @@ export class SessionCache {
         const previousEffort = session.effort
         const previousCollaborationMode = session.collaborationMode
         const previousCodexCollaborationState = session.codexCollaborationState
+        const previousCodexGoalState = session.codexGoalState
 
         session.active = true
         session.activeAt = Math.max(session.activeAt, t)
         session.thinking = Boolean(payload.thinking)
         session.thinkingAt = t
+
+        const lastPersistedAliveAt = this.lastPersistedAliveAtBySessionId.get(session.id) ?? 0
+        if (!wasActive || lastPersistedAliveAt === 0 || session.activeAt - lastPersistedAliveAt >= 10_000) {
+            this.store.sessions.setSessionActive(session.id, true, session.activeAt, session.namespace)
+            this.lastPersistedAliveAtBySessionId.set(session.id, session.activeAt)
+        }
+
         if (payload.permissionMode !== undefined) {
             session.permissionMode = payload.permissionMode
         }
@@ -221,6 +232,9 @@ export class SessionCache {
         if (payload.codexCollaborationState !== undefined) {
             session.codexCollaborationState = payload.codexCollaborationState
         }
+        if ('codexGoalState' in payload) {
+            session.codexGoalState = payload.codexGoalState
+        }
 
         const now = Date.now()
         const lastBroadcastAt = this.lastBroadcastAtBySessionId.get(session.id) ?? 0
@@ -230,6 +244,7 @@ export class SessionCache {
             || previousEffort !== session.effort
             || previousCollaborationMode !== session.collaborationMode
             || JSON.stringify(previousCodexCollaborationState) !== JSON.stringify(session.codexCollaborationState)
+            || JSON.stringify(previousCodexGoalState) !== JSON.stringify(session.codexGoalState)
         const shouldBroadcast = (!wasActive && session.active)
             || (wasThinking !== session.thinking)
             || modeChanged
@@ -249,7 +264,8 @@ export class SessionCache {
                     modelReasoningEffort: session.modelReasoningEffort,
                     effort: session.effort,
                     collaborationMode: session.collaborationMode,
-                    codexCollaborationState: session.codexCollaborationState
+                    codexCollaborationState: session.codexCollaborationState,
+                    codexGoalState: session.codexGoalState
                 }
             })
         }
@@ -286,8 +302,10 @@ export class SessionCache {
         session.thinkingAt = t
         session.backgroundTaskCount = 0
         session.codexCollaborationState = undefined
+        this.store.sessions.setSessionActive(session.id, false, session.activeAt, session.namespace)
+        this.lastPersistedAliveAtBySessionId.delete(session.id)
 
-        this.publisher.emit({ type: 'session-updated', sessionId: session.id, data: { active: false, thinking: false, backgroundTaskCount: 0, codexCollaborationState: undefined } })
+        this.publisher.emit({ type: 'session-updated', sessionId: session.id, data: { active: false, thinking: false, backgroundTaskCount: 0, codexCollaborationState: undefined, codexGoalState: session.codexGoalState } })
     }
 
     expireInactive(now: number = Date.now()): string[] {
@@ -301,7 +319,9 @@ export class SessionCache {
             session.thinking = false
             session.codexCollaborationState = undefined
             expired.push(session.id)
-            this.publisher.emit({ type: 'session-updated', sessionId: session.id, data: { active: false, codexCollaborationState: undefined } })
+            this.store.sessions.setSessionActive(session.id, false, session.activeAt, session.namespace)
+            this.lastPersistedAliveAtBySessionId.delete(session.id)
+            this.publisher.emit({ type: 'session-updated', sessionId: session.id, data: { active: false, codexCollaborationState: undefined, codexGoalState: session.codexGoalState } })
         }
 
         return expired

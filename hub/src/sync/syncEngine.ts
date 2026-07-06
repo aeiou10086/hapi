@@ -7,7 +7,7 @@
  * - No E2E encryption; data is stored as JSON in SQLite
  */
 
-import type { CodexCollaborationMode, CodexCollaborationState, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
+import type { CodexCollaborationMode, CodexCollaborationState, CodexGoalState, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import type { Server } from 'socket.io'
 import type { Store } from '../store'
 import type { RpcRegistry } from '../socket/rpcRegistry'
@@ -211,6 +211,7 @@ export class SyncEngine {
         effort?: string | null
         collaborationMode?: CodexCollaborationMode
         codexCollaborationState?: CodexCollaborationState
+        codexGoalState?: CodexGoalState
     }): void {
         this.sessionCache.handleSessionAlive(payload)
     }

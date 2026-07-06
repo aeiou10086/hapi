@@ -16,6 +16,7 @@ describe('appServerConfig', () => {
         expect(params.sandbox).toBe('danger-full-access');
         expect(params.approvalPolicy).toBe('never');
         expect(params.config).toEqual({
+            'tools.experimental_request_user_input': {},
             'mcp_servers.hapi': {
                 command: 'node',
                 args: ['mcp']
@@ -68,6 +69,7 @@ describe('appServerConfig', () => {
         expect(params.baseInstructions).toBeUndefined();
         expect(params.developerInstructions).toBeUndefined();
         expect(params.config).toEqual({
+            'tools.experimental_request_user_input': {},
             'mcp_servers.hapi': {
                 command: 'node',
                 args: ['mcp']
@@ -83,6 +85,7 @@ describe('appServerConfig', () => {
         });
 
         expect(params.config).toEqual({
+            'tools.experimental_request_user_input': {},
             'mcp_servers.hapi': {
                 command: 'node',
                 args: ['mcp']

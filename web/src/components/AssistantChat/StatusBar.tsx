@@ -7,7 +7,7 @@ import {
 import type { PermissionModeTone } from '@hapi/protocol'
 import { useMemo } from 'react'
 import type { AgentState, CodexCollaborationMode, PermissionMode } from '@/types/api'
-import type { CodexCollaborationState } from '@hapi/protocol/types'
+import type { CodexCollaborationState, CodexGoalState } from '@hapi/protocol/types'
 import type { ConversationStatus } from '@/realtime/types'
 import { getContextBudgetTokens } from '@/chat/modelConfig'
 import { useTranslation } from '@/lib/use-translation'
@@ -46,6 +46,7 @@ function getConnectionStatus(
     voiceStatus: ConversationStatus | undefined,
     backgroundTaskCount: number,
     codexCollaborationState: CodexCollaborationState | undefined,
+    codexGoalState: CodexGoalState | undefined,
     t: (key: string) => string
 ): { text: string; color: string; dotColor: string; isPulsing: boolean } {
     const hasPermissions = agentState?.requests && Object.keys(agentState.requests).length > 0
@@ -75,6 +76,33 @@ function getConnectionStatus(
             color: 'text-[#FF9500]',
             dotColor: 'bg-[#FF9500]',
             isPulsing: true
+        }
+    }
+
+    if (codexGoalState?.status === 'active') {
+        return {
+            text: `Pursuing goal${formatGoalElapsed(codexGoalState.timeUsedSeconds)}`,
+            color: 'text-[#007AFF]',
+            dotColor: 'bg-[#007AFF]',
+            isPulsing: true
+        }
+    }
+
+    if (codexGoalState?.status === 'paused') {
+        return {
+            text: `Goal paused${formatGoalElapsed(codexGoalState.timeUsedSeconds)}`,
+            color: 'text-amber-500',
+            dotColor: 'bg-[#FF9500]',
+            isPulsing: false
+        }
+    }
+
+    if (codexGoalState?.status === 'blocked') {
+        return {
+            text: `Goal blocked${formatGoalElapsed(codexGoalState.timeUsedSeconds)}`,
+            color: 'text-red-500',
+            dotColor: 'bg-red-500',
+            isPulsing: false
         }
     }
 
@@ -114,6 +142,21 @@ function getConnectionStatus(
     }
 }
 
+function formatGoalElapsed(seconds: number | undefined): string {
+    if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) {
+        return ''
+    }
+
+    const totalMinutes = Math.floor(seconds / 60)
+    const hours = Math.floor(totalMinutes / 60)
+    const minutes = totalMinutes % 60
+
+    if (hours > 0) {
+        return ` (${hours}h ${minutes}m)`
+    }
+    return ` (${minutes}m)`
+}
+
 function getContextWarning(contextSize: number, maxContextSize: number, t: (key: string, params?: Record<string, string | number>) => string): { text: string; color: string } | null {
     const percentageUsed = (contextSize / maxContextSize) * 100
     const percentageRemaining = Math.max(0, 100 - percentageUsed)
@@ -139,13 +182,14 @@ export function StatusBar(props: {
     permissionMode?: PermissionMode
     collaborationMode?: CodexCollaborationMode
     codexCollaborationState?: CodexCollaborationState
+    codexGoalState?: CodexGoalState
     agentFlavor?: string | null
     voiceStatus?: ConversationStatus
 }) {
     const { t } = useTranslation()
     const connectionStatus = useMemo(
-        () => getConnectionStatus(props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount ?? 0, props.codexCollaborationState, t),
-        [props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount, props.codexCollaborationState, t]
+        () => getConnectionStatus(props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount ?? 0, props.codexCollaborationState, props.codexGoalState, t),
+        [props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount, props.codexCollaborationState, props.codexGoalState, t]
     )
 
     const contextWarning = useMemo(

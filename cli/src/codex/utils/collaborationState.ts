@@ -1,4 +1,4 @@
-import type { CodexCollaborationState } from '@hapi/protocol/types';
+import type { CodexCollaborationActivity, CodexCollaborationState } from '@hapi/protocol/types';
 
 export type CodexCollaborationEvent = {
     type: 'codex_collaboration';
@@ -18,13 +18,22 @@ export type CodexThreadStatusEvent = {
     time?: number;
 };
 
+export type CodexThreadActivityEvent = {
+    thread_id: string;
+    activity: CodexCollaborationActivity;
+    time?: number;
+};
+
 const TERMINAL_CALL_STATUSES = new Set(['completed', 'failed', 'error', 'canceled', 'cancelled']);
 const TERMINAL_AGENT_STATUSES = new Set(['completed', 'failed', 'error', 'canceled', 'cancelled']);
 
 type ChildThreadState = {
     status?: string;
     message?: string | null;
+    activities?: CodexCollaborationActivity[];
 };
+
+const MAX_CHILD_ACTIVITIES = 8;
 
 function isTerminalStatus(status: string | undefined, terminalStatuses: Set<string>): boolean {
     if (!status) return false;
@@ -42,6 +51,7 @@ export class CodexCollaborationStateTracker {
             threadId,
             ...(state.status ? { status: state.status } : {}),
             ...(state.message !== undefined ? { message: state.message } : {}),
+            ...(state.activities && state.activities.length > 0 ? { activities: state.activities } : {}),
             active: !isTerminalStatus(state.status, TERMINAL_AGENT_STATUSES)
         }));
 
@@ -103,14 +113,16 @@ export class CodexCollaborationStateTracker {
             const previous = this.childThreads.get(threadId) ?? {};
             this.childThreads.set(threadId, {
                 status: state?.status ?? previous.status,
-                message: state?.message ?? previous.message
+                message: state?.message ?? previous.message,
+                activities: previous.activities
             });
         }
         for (const [threadId, state] of Object.entries(agentStates)) {
             const previous = this.childThreads.get(threadId) ?? {};
             this.childThreads.set(threadId, {
                 status: state?.status ?? previous.status,
-                message: state?.message ?? previous.message
+                message: state?.message ?? previous.message,
+                activities: previous.activities
             });
         }
 
@@ -132,6 +144,22 @@ export class CodexCollaborationStateTracker {
         });
 
         const now = event.time ?? Date.now();
+        return this.buildState(now);
+    }
+
+    applyThreadActivity(event: CodexThreadActivityEvent): CodexCollaborationState | null {
+        const previous = this.childThreads.get(event.thread_id);
+        if (!previous) {
+            return null;
+        }
+
+        const activities = [...(previous.activities ?? []), event.activity].slice(-MAX_CHILD_ACTIVITIES);
+        this.childThreads.set(event.thread_id, {
+            ...previous,
+            activities
+        });
+
+        const now = event.time ?? event.activity.time ?? Date.now();
         return this.buildState(now);
     }
 }

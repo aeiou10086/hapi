@@ -62,36 +62,68 @@ function createQueueStub() {
     };
 }
 
+function wait(ms = 0): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function createSessionStub(permissionMode: 'default' | 'read-only' | 'safe-yolo' | 'yolo', codexArgs?: string[], path = '/tmp/worktree') {
     const sessionEvents: Array<{ type: string; message?: string }> = [];
+    const thinkingChanges: boolean[] = [];
+    const goalStates: unknown[] = [];
+    let agentState: {
+        requests: Record<string, unknown>;
+        completedRequests: Record<string, unknown>;
+    } = {
+        requests: {},
+        completedRequests: {}
+    };
+    const rpcHandlers = new Map<string, (params: unknown) => Promise<unknown> | unknown>();
     let localLaunchFailure: { message: string; exitReason: 'switch' | 'exit' } | null = null;
-
-    return {
-        session: {
-            sessionId: null,
-            path,
-            startedBy: 'terminal' as const,
-            startingMode: 'local' as const,
-            codexArgs,
-            client: {
-                rpcHandlerManager: {
-                    registerHandler: () => {}
+    const session: Record<string, unknown> = {
+        sessionId: null,
+        path,
+        startedBy: 'terminal' as const,
+        startingMode: 'local' as const,
+        codexArgs,
+        thinking: false,
+        client: {
+            rpcHandlerManager: {
+                registerHandler: (method: string, handler: (params: unknown) => Promise<unknown> | unknown) => {
+                    rpcHandlers.set(method, handler);
                 }
             },
-            getPermissionMode: () => permissionMode,
-            getModelReasoningEffort: () => null,
-            onSessionFound: () => {},
-            sendSessionEvent: (event: { type: string; message?: string }) => {
-                sessionEvents.push(event);
-            },
-            recordLocalLaunchFailure: (message: string, exitReason: 'switch' | 'exit') => {
-                localLaunchFailure = { message, exitReason };
-            },
-            sendUserMessage: () => {},
-            sendAgentMessage: () => {},
-            queue: createQueueStub()
+            updateAgentState: (handler: (state: typeof agentState) => typeof agentState) => {
+                agentState = handler(agentState);
+            }
         },
+        getPermissionMode: () => permissionMode,
+        getModelReasoningEffort: () => null,
+        onSessionFound: () => {},
+        onThinkingChange: (thinking: boolean) => {
+            session.thinking = thinking;
+            thinkingChanges.push(thinking);
+        },
+        setCodexGoalState: (state: unknown) => {
+            goalStates.push(state);
+        },
+        sendSessionEvent: (event: { type: string; message?: string }) => {
+            sessionEvents.push(event);
+        },
+        recordLocalLaunchFailure: (message: string, exitReason: 'switch' | 'exit') => {
+            localLaunchFailure = { message, exitReason };
+        },
+        sendUserMessage: () => {},
+        sendAgentMessage: () => {},
+        queue: createQueueStub()
+    };
+
+    return {
+        session,
         sessionEvents,
+        thinkingChanges,
+        goalStates,
+        rpcHandlers,
+        getAgentState: () => agentState,
         getLocalLaunchFailure: () => localLaunchFailure
     };
 }
@@ -186,5 +218,187 @@ describe('codexLocalLauncher', () => {
             type: 'message',
             message: `${harness.scannerFailureMessage} Keeping local Codex running; remote transcript sync may be unavailable for this launch.`
         });
+    });
+
+    it('updates thinking state from local Codex transcript events', async () => {
+        const { session, thinkingChanges } = createSessionStub('default');
+
+        await codexLocalLauncher(session as never);
+
+        const scannerCall = harness.sessionScannerCalls[0] as {
+            onEvent?: (event: unknown) => void;
+        } | undefined;
+
+        scannerCall?.onEvent?.({
+            type: 'event_msg',
+            payload: { type: 'user_message', message: 'run ls' }
+        });
+        scannerCall?.onEvent?.({
+            type: 'response_item',
+            payload: { type: 'function_call', name: 'exec_command', call_id: 'call-1', arguments: '{}' }
+        });
+        scannerCall?.onEvent?.({
+            type: 'event_msg',
+            payload: { type: 'token_count', info: {} }
+        });
+        scannerCall?.onEvent?.({
+            type: 'event_msg',
+            payload: { type: 'task_complete', turn_id: 'turn-1' }
+        });
+
+        expect(thinkingChanges).toEqual([true, false]);
+        expect(session.thinking).toBe(false);
+    });
+
+    it('surfaces paused goal resume prompts as request_user_input cards', async () => {
+        const { session, getAgentState, rpcHandlers } = createSessionStub('default');
+
+        await codexLocalLauncher(session as never);
+
+        const scannerCall = harness.sessionScannerCalls[0] as {
+            onEvent?: (event: unknown) => void;
+        } | undefined;
+
+        scannerCall?.onEvent?.({
+            type: 'event_msg',
+            payload: {
+                type: 'thread_goal_updated',
+                threadId: 'thread-1',
+                goal: {
+                    threadId: 'thread-1',
+                    objective: 'Prioritize and execute the 60-day Q System mainline tasks',
+                    status: 'paused'
+                }
+            }
+        });
+
+        await wait();
+
+        expect(getAgentState().requests).toMatchObject({
+            'codex-goal-resume:thread-1': {
+                tool: 'request_user_input',
+                arguments: {
+                    questions: [
+                        {
+                            id: 'resume_goal',
+                            question: expect.stringContaining('Resume paused goal?'),
+                            options: [
+                                {
+                                    label: 'Resume goal',
+                                    description: 'Mark it active and continue when idle'
+                                },
+                                {
+                                    label: 'Leave paused',
+                                    description: 'Keep it paused; use /goal resume later'
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        });
+
+        const permissionRpc = rpcHandlers.get('permission');
+        expect(permissionRpc).toBeTypeOf('function');
+
+        const answers = {
+            resume_goal: {
+                answers: ['Resume goal']
+            }
+        };
+        await permissionRpc?.({
+            id: 'codex-goal-resume:thread-1',
+            approved: true,
+            answers
+        });
+
+        expect(getAgentState().requests).toEqual({});
+        expect(getAgentState().completedRequests).toMatchObject({
+            'codex-goal-resume:thread-1': {
+                tool: 'request_user_input',
+                status: 'approved',
+                answers
+            }
+        });
+    });
+
+    it('syncs local Codex goal updates into session runtime state', async () => {
+        const { session, goalStates } = createSessionStub('default');
+
+        await codexLocalLauncher(session as never);
+
+        const scannerCall = harness.sessionScannerCalls[0] as {
+            onEvent?: (event: unknown) => void;
+        } | undefined;
+
+        scannerCall?.onEvent?.({
+            type: 'event_msg',
+            payload: {
+                type: 'thread_goal_updated',
+                threadId: 'thread-1',
+                goal: {
+                    threadId: 'thread-1',
+                    objective: 'Ship the MVP',
+                    status: 'active',
+                    timeUsedSeconds: 73980
+                }
+            }
+        });
+        scannerCall?.onEvent?.({
+            type: 'event_msg',
+            payload: {
+                type: 'thread_goal_cleared',
+                threadId: 'thread-1'
+            }
+        });
+
+        expect(goalStates).toEqual([
+            {
+                threadId: 'thread-1',
+                objective: 'Ship the MVP',
+                status: 'active',
+                timeUsedSeconds: 73980
+            },
+            undefined
+        ]);
+    });
+
+    it('does not leave a resume prompt when replayed goal history is already active', async () => {
+        const { session, getAgentState } = createSessionStub('default');
+
+        await codexLocalLauncher(session as never);
+
+        const scannerCall = harness.sessionScannerCalls[0] as {
+            onEvent?: (event: unknown) => void;
+        } | undefined;
+
+        scannerCall?.onEvent?.({
+            type: 'event_msg',
+            payload: {
+                type: 'thread_goal_updated',
+                threadId: 'thread-1',
+                goal: {
+                    threadId: 'thread-1',
+                    objective: 'Prioritize and execute the 60-day Q System mainline tasks',
+                    status: 'paused'
+                }
+            }
+        });
+        scannerCall?.onEvent?.({
+            type: 'event_msg',
+            payload: {
+                type: 'thread_goal_updated',
+                threadId: 'thread-1',
+                goal: {
+                    threadId: 'thread-1',
+                    objective: 'Prioritize and execute the 60-day Q System mainline tasks',
+                    status: 'active'
+                }
+            }
+        });
+
+        await wait();
+
+        expect(getAgentState().requests).toEqual({});
     });
 });

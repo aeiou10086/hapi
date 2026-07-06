@@ -164,4 +164,49 @@ describe('CodexCollaborationStateTracker', () => {
             }
         ]);
     });
+
+    it('records recent child thread activity for the collaboration panel', () => {
+        const tracker = new CodexCollaborationStateTracker();
+
+        tracker.applyEvent({
+            type: 'codex_collaboration',
+            call_id: 'spawn-1',
+            status: 'completed',
+            receiver_thread_ids: ['child-thread'],
+            agents_states: {
+                'child-thread': { status: 'running' }
+            },
+            time: 100
+        });
+
+        const updated = tracker.applyThreadActivity({
+            thread_id: 'child-thread',
+            activity: {
+                id: 'activity-1',
+                type: 'message',
+                text: 'Found validation gap',
+                time: 125
+            },
+            time: 125
+        });
+
+        expect(updated).toMatchObject({
+            status: 'collaborating',
+            childThreads: [
+                {
+                    threadId: 'child-thread',
+                    status: 'running',
+                    active: true,
+                    activities: [
+                        {
+                            id: 'activity-1',
+                            type: 'message',
+                            text: 'Found validation gap',
+                            time: 125
+                        }
+                    ]
+                }
+            ]
+        });
+    });
 });

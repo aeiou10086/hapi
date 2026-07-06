@@ -1,4 +1,5 @@
 import type { AttachmentMetadata, MessageStatus } from '@/types/api'
+import type { CodexCollaborationState } from '@hapi/protocol/types'
 
 export type UsageData = {
     input_tokens: number
@@ -66,6 +67,7 @@ export type NormalizedAgentContent =
     | ToolResult
     | { type: 'summary'; summary: string }
     | { type: 'sidechain'; uuid: string; parentUUID: string | null; prompt: string }
+    | { type: 'codex-collaboration'; state: CodexCollaborationState; uuid: string; parentUUID: string | null }
 
 export type NormalizedMessage = ({
     role: 'user'
@@ -161,6 +163,15 @@ export type AgentEventBlock = {
     meta?: unknown
 }
 
+export type CodexCollaborationBlock = {
+    kind: 'codex-collaboration'
+    id: string
+    localId: string | null
+    createdAt: number
+    state: CodexCollaborationState
+    meta?: unknown
+}
+
 export type ToolCallBlock = {
     kind: 'tool-call'
     id: string
@@ -171,4 +182,4 @@ export type ToolCallBlock = {
     meta?: unknown
 }
 
-export type ChatBlock = UserTextBlock | AgentTextBlock | AgentReasoningBlock | CliOutputBlock | ToolCallBlock | AgentEventBlock
+export type ChatBlock = UserTextBlock | AgentTextBlock | AgentReasoningBlock | CliOutputBlock | ToolCallBlock | AgentEventBlock | CodexCollaborationBlock

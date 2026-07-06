@@ -142,10 +142,21 @@ export const TeamStateSchema = z.object({
 
 export type TeamState = z.infer<typeof TeamStateSchema>
 
+export const CodexCollaborationActivitySchema = z.object({
+    id: z.string(),
+    type: z.enum(['message', 'reasoning', 'tool', 'result', 'status']),
+    text: z.string().optional(),
+    tool: z.string().optional(),
+    time: z.number()
+})
+
+export type CodexCollaborationActivity = z.infer<typeof CodexCollaborationActivitySchema>
+
 export const CodexCollaborationChildThreadSchema = z.object({
     threadId: z.string(),
     status: z.string().optional(),
     message: z.string().nullable().optional(),
+    activities: z.array(CodexCollaborationActivitySchema).optional(),
     active: z.boolean()
 })
 
@@ -162,6 +173,18 @@ export const CodexCollaborationStateSchema = z.object({
 })
 
 export type CodexCollaborationState = z.infer<typeof CodexCollaborationStateSchema>
+
+export const CodexGoalStateSchema = z.object({
+    threadId: z.string().optional(),
+    objective: z.string().optional(),
+    status: z.string(),
+    tokenBudget: z.number().nullable().optional(),
+    tokensUsed: z.number().optional(),
+    timeUsedSeconds: z.number().optional(),
+    updatedAt: z.number().optional()
+})
+
+export type CodexGoalState = z.infer<typeof CodexGoalStateSchema>
 
 export const AttachmentMetadataSchema = z.object({
     id: z.string(),
@@ -200,6 +223,7 @@ export const SessionSchema = z.object({
     thinkingAt: z.number(),
     backgroundTaskCount: z.number().optional(),
     codexCollaborationState: CodexCollaborationStateSchema.optional(),
+    codexGoalState: CodexGoalStateSchema.optional(),
     todos: TodosSchema.optional(),
     teamState: TeamStateSchema.optional(),
     model: z.string().nullable().optional().default(null),

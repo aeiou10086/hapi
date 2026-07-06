@@ -63,5 +63,14 @@ describe('Codex slash command helpers', () => {
         })
         expect(parseCodexBuiltinSlashCommand('/undo 3')).toEqual({ kind: 'undo', numTurns: 3 })
         expect(parseCodexBuiltinSlashCommand('/status')).toEqual({ kind: 'status' })
+        expect(parseCodexBuiltinSlashCommand('/goal')).toEqual({ kind: 'goal', action: 'show' })
+        expect(parseCodexBuiltinSlashCommand('/goal Ship the MVP')).toEqual({
+            kind: 'goal',
+            action: 'set',
+            objective: 'Ship the MVP'
+        })
+        expect(parseCodexBuiltinSlashCommand('/goal clear')).toEqual({ kind: 'goal', action: 'clear' })
+        expect(parseCodexBuiltinSlashCommand('/goal pause')).toEqual({ kind: 'goal', action: 'pause' })
+        expect(parseCodexBuiltinSlashCommand('/goal resume')).toEqual({ kind: 'goal', action: 'resume' })
     })
 })

@@ -1,7 +1,7 @@
 import type { ClientToServerEvents } from '@hapi/protocol'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
-import type { CodexCollaborationMode, CodexCollaborationState, PermissionMode } from '@hapi/protocol/types'
+import type { CodexCollaborationMode, CodexCollaborationState, CodexGoalState, PermissionMode } from '@hapi/protocol/types'
 import type { Store, StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
 import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
@@ -21,6 +21,7 @@ type SessionAlivePayload = {
     effort?: string | null
     collaborationMode?: CodexCollaborationMode
     codexCollaborationState?: CodexCollaborationState
+    codexGoalState?: CodexGoalState
 }
 
 type SessionEndPayload = {

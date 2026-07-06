@@ -19,6 +19,12 @@ import type {
     ReviewStartResponse,
     ThreadRollbackParams,
     ThreadRollbackResponse,
+    ThreadGoalGetParams,
+    ThreadGoalGetResponse,
+    ThreadGoalSetParams,
+    ThreadGoalSetResponse,
+    ThreadGoalClearParams,
+    ThreadGoalClearResponse,
     GitDiffToRemoteParams,
     GitDiffToRemoteResponse
 } from './appServerTypes';
@@ -209,6 +215,27 @@ export class CodexAppServerClient {
             timeoutMs: 30_000
         });
         return response as ThreadRollbackResponse;
+    }
+
+    async getThreadGoal(params: ThreadGoalGetParams): Promise<ThreadGoalGetResponse> {
+        const response = await this.sendRequest('thread/goal/get', params, {
+            timeoutMs: 30_000
+        });
+        return response as ThreadGoalGetResponse;
+    }
+
+    async setThreadGoal(params: ThreadGoalSetParams): Promise<ThreadGoalSetResponse> {
+        const response = await this.sendRequest('thread/goal/set', params, {
+            timeoutMs: 30_000
+        });
+        return response as ThreadGoalSetResponse;
+    }
+
+    async clearThreadGoal(params: ThreadGoalClearParams): Promise<ThreadGoalClearResponse> {
+        const response = await this.sendRequest('thread/goal/clear', params, {
+            timeoutMs: 30_000
+        });
+        return response as ThreadGoalClearResponse;
     }
 
     async gitDiffToRemote(params: GitDiffToRemoteParams): Promise<GitDiffToRemoteResponse> {

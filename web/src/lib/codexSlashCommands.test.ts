@@ -6,6 +6,7 @@ describe('getBuiltinSlashCommands', () => {
         expect(getBuiltinSlashCommands('codex').map(command => command.name)).toEqual([
             'compact',
             'diff',
+            'goal',
             'new',
             'review',
             'status',

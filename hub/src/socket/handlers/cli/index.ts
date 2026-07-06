@@ -1,4 +1,4 @@
-import type { CodexCollaborationMode, CodexCollaborationState, PermissionMode } from '@hapi/protocol/types'
+import type { CodexCollaborationMode, CodexCollaborationState, CodexGoalState, PermissionMode } from '@hapi/protocol/types'
 import type { Store, StoredMachine, StoredSession } from '../../../store'
 import type { RpcRegistry } from '../../rpcRegistry'
 import type { SyncEvent } from '../../../sync/syncEngine'
@@ -21,6 +21,7 @@ type SessionAlivePayload = {
     effort?: string | null
     collaborationMode?: CodexCollaborationMode
     codexCollaborationState?: CodexCollaborationState
+    codexGoalState?: CodexGoalState
 }
 
 type SessionEndPayload = {

@@ -6,11 +6,24 @@ const harness = vi.hoisted(() => ({
     notifications: [] as Array<{ method: string; params: unknown }>,
     registerRequestCalls: [] as string[],
     initializeCalls: [] as unknown[],
+    startThreadCalls: [] as unknown[],
+    startTurnCalls: [] as unknown[],
+    goalSetCalls: [] as Array<Record<string, unknown>>,
+    currentGoal: {
+        threadId: 'thread-anonymous',
+        objective: 'Ship the MVP',
+        status: 'active',
+        tokenBudget: null,
+        tokensUsed: 42,
+        timeUsedSeconds: 7
+    } as Record<string, unknown> | null,
     turnStartedIncludesId: false,
     turnCompletedIncludesId: false,
     startTurnReturnsId: false,
     emitCollaborationBeforeComplete: false,
-    emitChildTurnLifecycleDuringParent: false
+    emitChildTurnLifecycleDuringParent: false,
+    emitChildMessageDuringCollab: false,
+    childCollaborationStatus: 'notLoaded'
 }));
 
 vi.mock('./codexAppServerClient', () => {
@@ -32,7 +45,8 @@ vi.mock('./codexAppServerClient', () => {
             harness.registerRequestCalls.push(method);
         }
 
-        async startThread(): Promise<{ thread: { id: string }; model: string }> {
+        async startThread(params: unknown): Promise<{ thread: { id: string }; model: string }> {
+            harness.startThreadCalls.push(params);
             return { thread: { id: 'thread-anonymous' }, model: 'gpt-5.4' };
         }
 
@@ -40,7 +54,8 @@ vi.mock('./codexAppServerClient', () => {
             return { thread: { id: 'thread-anonymous' }, model: 'gpt-5.4' };
         }
 
-        async startTurn(): Promise<{ turn: { id?: string } }> {
+        async startTurn(params: unknown): Promise<{ turn: { id?: string } }> {
+            harness.startTurnCalls.push(params);
             const turnId = 'turn-current';
             const started = { threadId: 'thread-anonymous', turn: harness.turnStartedIncludesId ? { id: turnId } : {} };
             harness.notifications.push({ method: 'turn/started', params: started });
@@ -65,7 +80,7 @@ vi.mock('./codexAppServerClient', () => {
                         receiverThreadIds: ['child-thread'],
                         agentsStates: {
                             'child-thread': {
-                                status: 'notLoaded',
+                                status: harness.childCollaborationStatus,
                                 message: 'Status: completed.'
                             }
                         }
@@ -73,6 +88,19 @@ vi.mock('./codexAppServerClient', () => {
                 };
                 harness.notifications.push({ method: 'item/completed', params: collaboration });
                 this.notificationHandler?.('item/completed', collaboration);
+
+                if (harness.emitChildMessageDuringCollab) {
+                    const childMessage = {
+                        threadId: 'child-thread',
+                        item: {
+                            id: 'child-message-1',
+                            type: 'agentMessage',
+                            content: [{ type: 'text', text: 'Child found a gap.' }]
+                        }
+                    };
+                    harness.notifications.push({ method: 'item/completed', params: childMessage });
+                    this.notificationHandler?.('item/completed', childMessage);
+                }
             }
 
             const completed = { threadId: 'thread-anonymous', status: 'Completed', turn: harness.turnCompletedIncludesId ? { id: turnId } : {} };
@@ -83,6 +111,30 @@ vi.mock('./codexAppServerClient', () => {
         }
 
         async interruptTurn(): Promise<Record<string, never>> {
+            return {};
+        }
+
+        async getThreadGoal(): Promise<{ goal: Record<string, unknown> | null }> {
+            return {
+                goal: harness.currentGoal
+            };
+        }
+
+        async setThreadGoal(params: Record<string, unknown>): Promise<{ goal: Record<string, unknown> }> {
+            harness.goalSetCalls.push(params);
+            return {
+                goal: {
+                    threadId: 'thread-anonymous',
+                    objective: typeof params.objective === 'string' ? params.objective : 'New objective',
+                    status: typeof params.status === 'string' ? params.status : 'active',
+                    tokenBudget: null,
+                    tokensUsed: 0,
+                    timeUsedSeconds: 0
+                }
+            };
+        }
+
+        async clearThreadGoal(): Promise<Record<string, never>> {
             return {};
         }
 
@@ -108,22 +160,24 @@ type FakeAgentState = {
     completedRequests: Record<string, unknown>;
 };
 
-function createMode(): EnhancedMode {
+function createMode(overrides: Partial<EnhancedMode> = {}): EnhancedMode {
     return {
         permissionMode: 'default',
-        collaborationMode: 'default'
+        collaborationMode: 'default',
+        ...overrides
     };
 }
 
-function createSessionStub() {
+function createSessionStub(initialMessage = 'hello from launcher test', mode = createMode()) {
     const queue = new MessageQueue2<EnhancedMode>((mode) => JSON.stringify(mode));
-    queue.push('hello from launcher test', createMode());
+    queue.push(initialMessage, mode);
     queue.close();
 
     const sessionEvents: Array<{ type: string; [key: string]: unknown }> = [];
     const codexMessages: unknown[] = [];
     const thinkingChanges: boolean[] = [];
     const collaborationStates: unknown[] = [];
+    const goalStates: unknown[] = [];
     const foundSessionIds: string[] = [];
     let currentModel: string | null | undefined;
     let agentState: FakeAgentState = {
@@ -179,6 +233,9 @@ function createSessionStub() {
         setCodexCollaborationState(state: unknown) {
             collaborationStates.push(state);
         },
+        setCodexGoalState(state: unknown) {
+            goalStates.push(state);
+        },
         sendAgentMessage(message: unknown) {
             client.sendAgentMessage(message);
         },
@@ -197,6 +254,7 @@ function createSessionStub() {
         thinkingChanges,
         foundSessionIds,
         collaborationStates,
+        goalStates,
         rpcHandlers,
         getModel: () => currentModel,
         getAgentState: () => agentState
@@ -208,11 +266,24 @@ describe('codexRemoteLauncher', () => {
         harness.notifications = [];
         harness.registerRequestCalls = [];
         harness.initializeCalls = [];
+        harness.startThreadCalls = [];
+        harness.startTurnCalls = [];
+        harness.goalSetCalls = [];
+        harness.currentGoal = {
+            threadId: 'thread-anonymous',
+            objective: 'Ship the MVP',
+            status: 'active',
+            tokenBudget: null,
+            tokensUsed: 42,
+            timeUsedSeconds: 7
+        };
         harness.turnStartedIncludesId = false;
         harness.turnCompletedIncludesId = false;
         harness.startTurnReturnsId = false;
         harness.emitCollaborationBeforeComplete = false;
         harness.emitChildTurnLifecycleDuringParent = false;
+        harness.emitChildMessageDuringCollab = false;
+        harness.childCollaborationStatus = 'notLoaded';
     });
 
     it('finishes a turn and emits ready when task lifecycle events omit turn_id', async () => {
@@ -242,6 +313,57 @@ describe('codexRemoteLauncher', () => {
         expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
         expect(thinkingChanges).toContain(true);
         expect(session.thinking).toBe(false);
+    });
+
+    it('starts remote Codex threads with a request_user_input struct config', async () => {
+        const { session } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        expect(harness.startThreadCalls[0]).toMatchObject({
+            config: {
+                'tools.experimental_request_user_input': {}
+            }
+        });
+    });
+
+    it('supports yolo mode in remote Codex parameters without invalid request_user_input config', async () => {
+        const { session } = createSessionStub(
+            'hello from yolo web session',
+            createMode({ permissionMode: 'yolo' })
+        );
+
+        await codexRemoteLauncher(session as never);
+
+        expect(harness.startThreadCalls[0]).toMatchObject({
+            approvalPolicy: 'never',
+            sandbox: 'danger-full-access',
+            config: {
+                'tools.experimental_request_user_input': {}
+            }
+        });
+        expect(harness.startTurnCalls[0]).toMatchObject({
+            approvalPolicy: 'never',
+            sandboxPolicy: { type: 'dangerFullAccess' }
+        });
+    });
+
+    it('syncs current app-server goal into session runtime state', async () => {
+        const {
+            session,
+            goalStates
+        } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        expect(goalStates).toContainEqual({
+            threadId: 'thread-anonymous',
+            objective: 'Ship the MVP',
+            status: 'active',
+            tokenBudget: null,
+            tokensUsed: 42,
+            timeUsedSeconds: 7
+        });
     });
 
     it('finishes a turn when task_started has turn_id but task_complete omits it', async () => {
@@ -295,5 +417,167 @@ describe('codexRemoteLauncher', () => {
 
         expect(thinkingChanges).toEqual([true, false]);
         expect(session.thinking).toBe(false);
+    });
+
+    it('mirrors child thread messages into collaboration state while preserving the turn', async () => {
+        harness.turnStartedIncludesId = true;
+        harness.turnCompletedIncludesId = true;
+        harness.startTurnReturnsId = true;
+        harness.emitCollaborationBeforeComplete = true;
+        harness.emitChildMessageDuringCollab = true;
+
+        const {
+            session,
+            collaborationStates,
+            codexMessages
+        } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        expect(codexMessages).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'message',
+                message: 'Child found a gap.'
+            })
+        ]));
+        expect(collaborationStates).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                childThreads: [
+                    expect.objectContaining({
+                        threadId: 'child-thread',
+                        activities: [
+                            expect.objectContaining({
+                                type: 'message',
+                                text: 'Child found a gap.'
+                            })
+                        ]
+                    })
+                ]
+            })
+        ]));
+    });
+
+    it('emits a collaboration summary message when all child threads complete', async () => {
+        harness.turnStartedIncludesId = true;
+        harness.turnCompletedIncludesId = true;
+        harness.startTurnReturnsId = true;
+        harness.emitCollaborationBeforeComplete = true;
+        harness.emitChildMessageDuringCollab = true;
+        harness.childCollaborationStatus = 'completed';
+
+        const {
+            session,
+            codexMessages
+        } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        expect(codexMessages).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'codex-collaboration-summary',
+                state: expect.objectContaining({
+                    status: 'completed',
+                    childThreadCount: 1
+                })
+            })
+        ]));
+    });
+
+    it('handles /goal by reading the app-server thread goal', async () => {
+        const {
+            session,
+            codexMessages
+        } = createSessionStub('/goal');
+
+        await codexRemoteLauncher(session as never);
+
+        expect(harness.notifications).toEqual([]);
+        expect(codexMessages).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'message',
+                message: expect.stringContaining('Ship the MVP')
+            })
+        ]));
+        expect(codexMessages).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                message: expect.stringContaining('tokens used 42')
+            })
+        ]));
+    });
+
+    it('handles /goal with an objective through the app-server goal API', async () => {
+        const {
+            session,
+            codexMessages
+        } = createSessionStub('/goal New objective');
+
+        await codexRemoteLauncher(session as never);
+
+        expect(harness.notifications).toEqual([]);
+        expect(codexMessages).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'message',
+                message: expect.stringContaining('Codex goal set')
+            })
+        ]));
+    });
+
+    it('handles /goal clear through the app-server goal API', async () => {
+        const {
+            session,
+            codexMessages
+        } = createSessionStub('/goal clear');
+
+        await codexRemoteLauncher(session as never);
+
+        expect(harness.notifications).toEqual([]);
+        expect(codexMessages).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'message',
+                message: 'Codex goal cleared.'
+            })
+        ]));
+    });
+
+    it('handles /goal pause through the app-server goal API', async () => {
+        const {
+            session,
+            codexMessages
+        } = createSessionStub('/goal pause');
+
+        await codexRemoteLauncher(session as never);
+
+        expect(harness.goalSetCalls).toEqual([expect.objectContaining({
+            threadId: 'thread-anonymous',
+            objective: 'Ship the MVP',
+            status: 'paused'
+        })]);
+        expect(codexMessages).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'message',
+                message: expect.stringContaining('Codex goal paused')
+            })
+        ]));
+    });
+
+    it('handles /goal resume through the app-server goal API', async () => {
+        const {
+            session,
+            codexMessages
+        } = createSessionStub('/goal resume');
+
+        await codexRemoteLauncher(session as never);
+
+        expect(harness.goalSetCalls).toEqual([expect.objectContaining({
+            threadId: 'thread-anonymous',
+            objective: 'Ship the MVP',
+            status: 'active'
+        })]);
+        expect(codexMessages).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'message',
+                message: expect.stringContaining('Codex goal resumed')
+            })
+        ]));
     });
 });

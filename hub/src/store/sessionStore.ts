@@ -9,6 +9,7 @@ import {
     getSessions,
     getSessionsByNamespace,
     setSessionEffort,
+    setSessionActive,
     setSessionModel,
     setSessionModelReasoningEffort,
     setSessionTeamState,
@@ -78,6 +79,10 @@ export class SessionStore {
 
     setSessionEffort(id: string, effort: string | null, namespace: string, options?: { touchUpdatedAt?: boolean }): boolean {
         return setSessionEffort(this.db, id, effort, namespace, options)
+    }
+
+    setSessionActive(id: string, active: boolean, activeAt: number | null, namespace: string): boolean {
+        return setSessionActive(this.db, id, active, activeAt, namespace)
     }
 
     getSession(id: string): StoredSession | null {

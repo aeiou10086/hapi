@@ -45,6 +45,42 @@ describe('reduceTimeline', () => {
         expect(blocks[0].kind).toBe('user-text')
     })
 
+    it('renders Codex collaboration summaries as collaboration blocks', () => {
+        const msg: TracedMessage = {
+            id: 'msg-collab',
+            localId: null,
+            createdAt: 1_700_000_000_000,
+            role: 'agent',
+            isSidechain: false,
+            content: [{
+                type: 'codex-collaboration',
+                uuid: 'collab-1',
+                parentUUID: null,
+                state: {
+                    status: 'completed',
+                    active: false,
+                    activeCallCount: 0,
+                    childThreadCount: 1,
+                    childThreads: [{ threadId: 'child-a', status: 'completed', active: false }],
+                    lastEventAt: 123,
+                    completedAt: 123
+                }
+            }]
+        } as TracedMessage
+
+        const { blocks } = reduceTimeline([msg], makeContext())
+
+        expect(blocks).toEqual([
+            expect.objectContaining({
+                kind: 'codex-collaboration',
+                id: 'msg-collab:0',
+                state: expect.objectContaining({
+                    childThreadCount: 1
+                })
+            })
+        ])
+    })
+
     it('does not filter XML-like user text (filtering is in normalize layer)', () => {
         const text = '<task-notification> <summary>Some task</summary> </task-notification>'
         const { blocks } = reduceTimeline([makeUserMessage(text)], makeContext())

@@ -13,6 +13,47 @@ function makeMessage(content: unknown): DecryptedMessage {
 }
 
 describe('normalizeDecryptedMessage', () => {
+    it('normalizes Codex collaboration summary payloads', () => {
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'codex-collaboration-summary',
+                    id: 'summary-1',
+                    state: {
+                        status: 'completed',
+                        active: false,
+                        activeCallCount: 0,
+                        childThreadCount: 1,
+                        childThreads: [
+                            {
+                                threadId: 'child-a',
+                                status: 'completed',
+                                active: false
+                            }
+                        ],
+                        lastEventAt: 123,
+                        completedAt: 123
+                    }
+                }
+            }
+        })
+
+        expect(normalizeDecryptedMessage(message)).toMatchObject({
+            role: 'agent',
+            content: [
+                {
+                    type: 'codex-collaboration',
+                    state: {
+                        status: 'completed',
+                        childThreadCount: 1
+                    }
+                }
+            ]
+        })
+    })
+
     it('drops unsupported Claude system output records', () => {
         const message = makeMessage({
             role: 'agent',

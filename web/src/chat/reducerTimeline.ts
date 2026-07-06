@@ -173,6 +173,18 @@ export function reduceTimeline(
                     continue
                 }
 
+                if (c.type === 'codex-collaboration') {
+                    blocks.push({
+                        kind: 'codex-collaboration',
+                        id: `${msg.id}:${idx}`,
+                        localId: msg.localId,
+                        createdAt: msg.createdAt,
+                        state: c.state,
+                        meta: msg.meta
+                    })
+                    continue
+                }
+
                 if (c.type === 'tool-call') {
                     if (isChangeTitleToolName(c.name)) {
                         const title = context.titleChangesByToolUseId.get(c.id) ?? extractTitleFromChangeTitleInput(c.input)

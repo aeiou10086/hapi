@@ -3,6 +3,8 @@ import { logger } from "@/ui/logger";
 import { join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { readFile, readdir, stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import type { CodexSessionEvent } from "./codexEventConverter";
 
 interface CodexSessionScannerOptions {
@@ -23,11 +25,19 @@ interface CodexSessionScanner {
 type PendingEvents = {
     events: CodexSessionEvent[];
     fileSessionId: string | null;
+    historyCursor: number;
 };
 
 type Candidate = {
     sessionId: string;
     score: number;
+};
+
+type CodexStateThreadRow = {
+    id: string;
+    rollout_path: string;
+    cwd: string;
+    activity_ms: number | null;
 };
 
 const DEFAULT_SESSION_START_WINDOW_MS = 2 * 60 * 1000;
@@ -74,20 +84,24 @@ class CodexSessionScannerImpl extends BaseSessionScanner<CodexSessionEvent> {
     private readonly sessionStartWindowMs: number;
     private readonly matchDeadlineMs: number;
     private readonly sessionDatePrefixes: Set<string> | null;
+    private readonly codexStateDbPath: string;
 
     private activeSessionId: string | null;
     private reportedSessionId: string | null;
     private matchFailed = false;
     private bestWithinWindow: Candidate | null = null;
     private readonly recentActivitySessionIds = new Set<string>();
+    private readonly stateCandidateSessionIds = new Set<string>();
     private firstRecentActivityCandidateResolved = false;
     private readonly firstRecentActivitySessionIds = new Set<string>();
     private loggedAmbiguousRecentActivity = false;
+    private loggedAmbiguousStateCandidate = false;
 
     constructor(opts: CodexSessionScannerOptions, targetCwd: string | null) {
         super({ intervalMs: 2000 });
         const codexHomeDir = process.env.CODEX_HOME || join(homedir(), '.codex');
         this.sessionsRoot = join(codexHomeDir, 'sessions');
+        this.codexStateDbPath = join(codexHomeDir, 'state_5.sqlite');
         this.onEvent = opts.onEvent;
         this.onSessionFound = opts.onSessionFound;
         this.onSessionMatchFailed = opts.onSessionMatchFailed;
@@ -114,7 +128,7 @@ class CodexSessionScannerImpl extends BaseSessionScanner<CodexSessionEvent> {
     }
 
     protected shouldScan(): boolean {
-        return !this.matchFailed;
+        return true;
     }
 
     protected shouldWatchFile(filePath: string): boolean {
@@ -145,6 +159,7 @@ class CodexSessionScannerImpl extends BaseSessionScanner<CodexSessionEvent> {
     protected async beforeScan(): Promise<void> {
         this.bestWithinWindow = null;
         this.recentActivitySessionIds.clear();
+        this.stateCandidateSessionIds.clear();
     }
 
     protected async findSessionFiles(): Promise<string[]> {
@@ -170,7 +185,7 @@ class CodexSessionScannerImpl extends BaseSessionScanner<CodexSessionEvent> {
         const fileSessionId = this.sessionIdByFile.get(filePath) ?? null;
 
         if (!this.activeSessionId && this.targetCwd) {
-            this.appendPendingEvents(filePath, stats.events, fileSessionId);
+            this.appendPendingEvents(filePath, stats.events, fileSessionId, stats.cursor);
             const candidate = this.getCandidateForFile(filePath);
             if (candidate) {
                 if (!this.bestWithinWindow || candidate.score < this.bestWithinWindow.score) {
@@ -205,7 +220,9 @@ class CodexSessionScannerImpl extends BaseSessionScanner<CodexSessionEvent> {
                     const [sessionId] = this.firstRecentActivitySessionIds;
                     if (sessionId) {
                         logger.debug(`[CODEX_SESSION_SCANNER] Selected session ${sessionId} from first unique matching activity after startup`);
-                        this.setActiveSessionId(sessionId);
+                        this.setActiveSessionId(sessionId, { flushPending: false });
+                        await this.replayPendingHistoryForSession(sessionId);
+                        this.flushPendingEventsForSession(sessionId);
                     }
                 } else if (
                     !this.loggedAmbiguousRecentActivity
@@ -217,7 +234,25 @@ class CodexSessionScannerImpl extends BaseSessionScanner<CodexSessionEvent> {
                 }
 
                 if (!this.activeSessionId) {
-                    if (Date.now() > this.matchDeadlineMs) {
+                    if (this.stateCandidateSessionIds.size === 1) {
+                        const [sessionId] = this.stateCandidateSessionIds;
+                        if (sessionId) {
+                            logger.debug(`[CODEX_SESSION_SCANNER] Selected session ${sessionId} from Codex state DB active thread candidate`);
+                            this.setActiveSessionId(sessionId, { flushPending: false });
+                            await this.replayHistoryForSession(sessionId);
+                            this.flushPendingEventsForSession(sessionId);
+                        }
+                    } else if (
+                        !this.loggedAmbiguousStateCandidate
+                        && this.stateCandidateSessionIds.size > 1
+                    ) {
+                        this.loggedAmbiguousStateCandidate = true;
+                        logger.debug('[CODEX_SESSION_SCANNER] Codex state DB active thread candidates were ambiguous; waiting for transcript activity');
+                    }
+                }
+
+                if (!this.activeSessionId) {
+                    if (!this.matchFailed && Date.now() > this.matchDeadlineMs) {
                         this.matchFailed = true;
                         this.pendingEventsByFile.clear();
                         const message = `No Codex session found within ${this.sessionStartWindowMs}ms for cwd ${this.targetCwd}; refusing fallback.`;
@@ -264,7 +299,7 @@ class CodexSessionScannerImpl extends BaseSessionScanner<CodexSessionEvent> {
         this.onSessionFound?.(sessionId);
     }
 
-    private setActiveSessionId(sessionId: string): void {
+    private setActiveSessionId(sessionId: string, opts?: { flushPending?: boolean }): void {
         this.activeSessionId = sessionId;
         this.reportSessionId(sessionId);
         const candidateFiles = this.getFilesForSession(sessionId);
@@ -274,31 +309,148 @@ class CodexSessionScannerImpl extends BaseSessionScanner<CodexSessionEvent> {
             }
         }
         this.pruneWatchers(this.getWatchedFiles().filter((filePath) => this.shouldWatchFile(filePath)));
-        if (this.targetCwd) {
+        if (this.targetCwd && opts?.flushPending !== false) {
             this.flushPendingEventsForSession(sessionId);
-        } else {
+        } else if (!this.targetCwd) {
             this.pendingEventsByFile.clear();
         }
     }
 
     private async listSessionFiles(dir: string): Promise<string[]> {
+        const results = new Set<string>();
+        await this.collectSessionFilesWithinDatePrefixes(dir, results);
+
+        if (this.shouldScanHistoricalSessionFiles()) {
+            await this.collectHistoricalSessionFiles(this.sessionsRoot, results);
+        }
+
+        this.collectRecentlyActiveCodexStateFiles(results);
+
+        return [...results];
+    }
+
+    private async collectSessionFilesWithinDatePrefixes(dir: string, results: Set<string>): Promise<void> {
         try {
             const entries = await readdir(dir, { withFileTypes: true });
-            const results: string[] = [];
             for (const entry of entries) {
                 const full = join(dir, entry.name);
                 if (!shouldIncludeSessionPath(full, this.sessionsRoot, this.sessionDatePrefixes)) {
                     continue;
                 }
                 if (entry.isDirectory()) {
-                    results.push(...await this.listSessionFiles(full));
+                    await this.collectSessionFilesWithinDatePrefixes(full, results);
                 } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
-                    results.push(full);
+                    results.add(full);
                 }
             }
-            return results;
         } catch (error) {
-            return [];
+        }
+    }
+
+    private shouldScanHistoricalSessionFiles(): boolean {
+        return Boolean(this.activeSessionId || this.targetCwd);
+    }
+
+    private async collectHistoricalSessionFiles(dir: string, results: Set<string>): Promise<void> {
+        try {
+            const entries = await readdir(dir, { withFileTypes: true });
+            for (const entry of entries) {
+                const full = join(dir, entry.name);
+                if (entry.isDirectory()) {
+                    await this.collectHistoricalSessionFiles(full, results);
+                    continue;
+                }
+                if (!entry.isFile() || !entry.name.endsWith('.jsonl')) {
+                    continue;
+                }
+                if (await this.shouldIncludeHistoricalSessionFile(full)) {
+                    results.add(full);
+                }
+            }
+        } catch (error) {
+        }
+    }
+
+    private async shouldIncludeHistoricalSessionFile(filePath: string): Promise<boolean> {
+        if (this.activeSessionId && filePath.endsWith(`-${this.activeSessionId}.jsonl`)) {
+            return true;
+        }
+
+        if (!this.targetCwd || this.activeSessionId) {
+            return false;
+        }
+
+        try {
+            const fileStats = await stat(filePath);
+            return fileStats.mtimeMs >= this.referenceTimestampMs - this.sessionStartWindowMs;
+        } catch {
+            return false;
+        }
+    }
+
+    private collectRecentlyActiveCodexStateFiles(results: Set<string>): void {
+        if (!this.targetCwd || this.activeSessionId || !existsSync(this.codexStateDbPath)) {
+            return;
+        }
+
+        try {
+            const referenceTimestampSeconds = Math.floor(this.referenceTimestampMs / 1000);
+            const output = execFileSync('sqlite3', [
+                '-json',
+                this.codexStateDbPath,
+                `
+                SELECT
+                    id,
+                    rollout_path,
+                    cwd,
+                    MAX(
+                        COALESCE(NULLIF(recency_at_ms, 0), 0),
+                        COALESCE(updated_at_ms, 0),
+                        COALESCE(updated_at * 1000, 0),
+                        COALESCE(created_at_ms, 0),
+                        COALESCE(created_at * 1000, 0)
+                    ) AS activity_ms
+                FROM threads
+                WHERE archived = 0
+                  AND rollout_path IS NOT NULL
+                  AND rollout_path != ''
+                  AND (
+                    recency_at_ms >= ${this.referenceTimestampMs}
+                    OR updated_at_ms >= ${this.referenceTimestampMs}
+                    OR updated_at >= ${referenceTimestampSeconds}
+                  )
+                ORDER BY activity_ms DESC
+                LIMIT 25
+                `
+            ], {
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'ignore']
+            });
+            const parsedRows = JSON.parse(output || '[]') as unknown;
+            const rows = Array.isArray(parsedRows) ? parsedRows as CodexStateThreadRow[] : [];
+
+            for (const row of rows) {
+                const sessionId = asString(row.id);
+                const rolloutPath = asString(row.rollout_path);
+                const cwd = asString(row.cwd);
+                if (!sessionId || !rolloutPath || !cwd) {
+                    continue;
+                }
+                if (normalizePath(cwd) !== this.targetCwd) {
+                    continue;
+                }
+                const activityMs = asNumber(row.activity_ms);
+                if (activityMs === null || activityMs < this.referenceTimestampMs) {
+                    continue;
+                }
+                const normalizedRolloutPath = resolve(rolloutPath);
+                this.sessionIdByFile.set(normalizedRolloutPath, sessionId);
+                this.sessionCwdByFile.set(normalizedRolloutPath, this.targetCwd);
+                this.stateCandidateSessionIds.add(sessionId);
+                results.add(normalizedRolloutPath);
+            }
+        } catch (error) {
+            logger.debug('[CODEX_SESSION_SCANNER] Failed to read Codex state DB for active thread candidates:', error);
         }
     }
 
@@ -427,7 +579,7 @@ class CodexSessionScannerImpl extends BaseSessionScanner<CodexSessionEvent> {
         return this.getWatchedFiles().filter((filePath) => filePath.endsWith(suffix));
     }
 
-    private appendPendingEvents(filePath: string, events: CodexSessionEvent[], fileSessionId: string | null): void {
+    private appendPendingEvents(filePath: string, events: CodexSessionEvent[], fileSessionId: string | null, historyCursor: number): void {
         if (events.length === 0) {
             return;
         }
@@ -437,12 +589,59 @@ class CodexSessionScannerImpl extends BaseSessionScanner<CodexSessionEvent> {
             if (!existing.fileSessionId && fileSessionId) {
                 existing.fileSessionId = fileSessionId;
             }
+            existing.historyCursor = Math.min(existing.historyCursor, historyCursor);
             return;
         }
         this.pendingEventsByFile.set(filePath, {
             events: [...events],
-            fileSessionId
+            fileSessionId,
+            historyCursor
         });
+    }
+
+    private async replayPendingHistoryForSession(sessionId: string): Promise<void> {
+        const matchingPending = [...this.pendingEventsByFile.entries()]
+            .filter(([filePath, pending]) => {
+                return (pending.fileSessionId && pending.fileSessionId === sessionId)
+                    || filePath.endsWith(`-${sessionId}.jsonl`);
+            })
+            .sort((a, b) => a[1].historyCursor - b[1].historyCursor);
+
+        if (matchingPending.length === 0) {
+            return;
+        }
+
+        let emitted = 0;
+        for (const [filePath, pending] of matchingPending) {
+            if (pending.historyCursor <= 0) {
+                continue;
+            }
+            const { events } = await this.readSessionFile(filePath, 0);
+            const historicalEvents = events
+                .filter((entry) => (entry.lineIndex ?? -1) < pending.historyCursor)
+                .map((entry) => entry.event)
+                .filter((event) => event.type !== 'session_meta');
+            emitted += this.emitEvents(historicalEvents, pending.fileSessionId ?? sessionId);
+        }
+
+        if (emitted > 0) {
+            logger.debug(`[CODEX_SESSION_SCANNER] Emitted ${emitted} historical events for session ${sessionId}`);
+        }
+    }
+
+    private async replayHistoryForSession(sessionId: string): Promise<void> {
+        const files = this.getFilesForSession(sessionId).sort();
+        let emitted = 0;
+        for (const filePath of files) {
+            const { events } = await this.readSessionFile(filePath, 0);
+            const historicalEvents = events
+                .map((entry) => entry.event)
+                .filter((event) => event.type !== 'session_meta');
+            emitted += this.emitEvents(historicalEvents, sessionId);
+        }
+        if (emitted > 0) {
+            logger.debug(`[CODEX_SESSION_SCANNER] Emitted ${emitted} state-selected historical events for session ${sessionId}`);
+        }
     }
 
     private emitEvents(events: CodexSessionEvent[], fileSessionId: string | null): number {
@@ -506,6 +705,10 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asString(value: unknown): string | null {
     return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function asNumber(value: unknown): number | null {
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 function parseTimestamp(value: unknown): number | null {

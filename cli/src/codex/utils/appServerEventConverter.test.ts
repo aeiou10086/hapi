@@ -47,16 +47,57 @@ describe('AppServerEventConverter', () => {
         }]);
     });
 
+    it('maps thread goal updates and clears', () => {
+        const converter = new AppServerEventConverter();
+
+        const updated = converter.handleNotification('thread/goal/updated', {
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+            goal: {
+                threadId: 'thread-1',
+                objective: 'Ship the MVP',
+                status: 'active',
+                tokenBudget: null,
+                tokensUsed: 12,
+                timeUsedSeconds: 3
+            }
+        });
+        expect(updated).toEqual([{
+            type: 'codex_goal_update',
+            thread_id: 'thread-1',
+            turn_id: 'turn-1',
+            goal: {
+                threadId: 'thread-1',
+                objective: 'Ship the MVP',
+                status: 'active',
+                tokenBudget: null,
+                tokensUsed: 12,
+                timeUsedSeconds: 3
+            }
+        }]);
+
+        const cleared = converter.handleNotification('thread/goal/cleared', {
+            threadId: 'thread-1',
+            turnId: 'turn-2'
+        });
+        expect(cleared).toEqual([{
+            type: 'codex_goal_cleared',
+            thread_id: 'thread-1',
+            turn_id: 'turn-2'
+        }]);
+    });
+
     it('accumulates agent message deltas', () => {
         const converter = new AppServerEventConverter();
 
         converter.handleNotification('item/agentMessage/delta', { itemId: 'msg-1', delta: 'Hello' });
         converter.handleNotification('item/agentMessage/delta', { itemId: 'msg-1', delta: ' world' });
         const completed = converter.handleNotification('item/completed', {
+            threadId: 'child-thread',
             item: { id: 'msg-1', type: 'agentMessage' }
         });
 
-        expect(completed).toEqual([{ type: 'agent_message', message: 'Hello world' }]);
+        expect(completed).toEqual([{ type: 'agent_message', message: 'Hello world', thread_id: 'child-thread' }]);
     });
 
     it('deduplicates repeated agent message completions for the same item', () => {
@@ -254,6 +295,34 @@ describe('AppServerEventConverter', () => {
             msg: { type: 'task_complete', turn_id: 'turn-1' }
         });
         expect(completed).toEqual([{ type: 'task_complete', turn_id: 'turn-1' }]);
+    });
+
+    it('unwraps codex/event thread goal updates', () => {
+        const converter = new AppServerEventConverter();
+
+        const updated = converter.handleNotification('codex/event/thread_goal_updated', {
+            msg: {
+                type: 'thread_goal_updated',
+                thread_id: 'thread-1',
+                turn_id: 'turn-1',
+                goal: {
+                    threadId: 'thread-1',
+                    objective: 'Ship the MVP',
+                    status: 'blocked'
+                }
+            }
+        });
+
+        expect(updated).toEqual([{
+            type: 'codex_goal_update',
+            thread_id: 'thread-1',
+            turn_id: 'turn-1',
+            goal: {
+                threadId: 'thread-1',
+                objective: 'Ship the MVP',
+                status: 'blocked'
+            }
+        }]);
     });
 
     it('ignores wrapped terminal lifecycle events without turn_id', () => {

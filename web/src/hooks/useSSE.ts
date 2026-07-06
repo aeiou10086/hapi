@@ -30,7 +30,7 @@ const RECONNECT_MAX_DELAY_MS = 30_000
 const RECONNECT_JITTER_MS = 500
 const INVALIDATION_BATCH_MS = 16
 
-type SessionPatch = Partial<Pick<Session, 'active' | 'thinking' | 'activeAt' | 'updatedAt' | 'model' | 'modelReasoningEffort' | 'effort' | 'permissionMode' | 'collaborationMode' | 'codexCollaborationState'>>
+type SessionPatch = Partial<Pick<Session, 'active' | 'thinking' | 'activeAt' | 'updatedAt' | 'model' | 'modelReasoningEffort' | 'effort' | 'permissionMode' | 'collaborationMode' | 'codexCollaborationState' | 'codexGoalState'>>
 
 function sortSessionSummaries(left: SessionSummary, right: SessionSummary): number {
     if (left.active !== right.active) {
@@ -107,6 +107,12 @@ function getSessionPatch(value: unknown): SessionPatch | null {
             hasKnownPatch = true
         }
     }
+    if (value.codexGoalState === undefined || hasRecordShape(value.codexGoalState)) {
+        if (Object.prototype.hasOwnProperty.call(value, 'codexGoalState')) {
+            patch.codexGoalState = value.codexGoalState as Session['codexGoalState']
+            hasKnownPatch = true
+        }
+    }
 
     return hasKnownPatch ? patch : null
 }
@@ -115,7 +121,7 @@ function hasUnknownSessionPatchKeys(value: unknown): boolean {
     if (!hasRecordShape(value)) {
         return false
     }
-    const knownKeys = new Set(['active', 'thinking', 'activeAt', 'updatedAt', 'model', 'modelReasoningEffort', 'effort', 'permissionMode', 'collaborationMode', 'codexCollaborationState'])
+    const knownKeys = new Set(['active', 'thinking', 'activeAt', 'updatedAt', 'model', 'modelReasoningEffort', 'effort', 'permissionMode', 'collaborationMode', 'codexCollaborationState', 'codexGoalState'])
     return Object.keys(value).some((key) => !knownKeys.has(key))
 }
 
@@ -404,7 +410,10 @@ export function useSSE(options: {
                     effort: Object.prototype.hasOwnProperty.call(patch, 'effort') ? patch.effort ?? null : current.effort,
                     codexCollaborationState: Object.prototype.hasOwnProperty.call(patch, 'codexCollaborationState')
                         ? patch.codexCollaborationState
-                        : current.codexCollaborationState
+                        : current.codexCollaborationState,
+                    codexGoalState: Object.prototype.hasOwnProperty.call(patch, 'codexGoalState')
+                        ? patch.codexGoalState
+                        : current.codexGoalState
                 }
 
                 patched = true

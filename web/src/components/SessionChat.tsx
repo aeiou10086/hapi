@@ -404,6 +404,7 @@ export function SessionChat(props: {
                         agentState={props.session.agentState}
                         backgroundTaskCount={props.session.backgroundTaskCount}
                         codexCollaborationState={props.session.codexCollaborationState}
+                        codexGoalState={props.session.codexGoalState}
                         contextSize={reduced.latestUsage?.contextSize}
                         controlledByUser={controlledByUser}
                         onCollaborationModeChange={

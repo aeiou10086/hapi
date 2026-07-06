@@ -41,6 +41,15 @@ function extractItem(params: Record<string, unknown>): Record<string, unknown> |
     return item ?? params;
 }
 
+function eventScope(params: Record<string, unknown>, item?: Record<string, unknown> | null): Record<string, string> {
+    const threadId = asString(params.threadId ?? params.thread_id ?? item?.threadId ?? item?.thread_id);
+    const turnId = asString(params.turnId ?? params.turn_id ?? item?.turnId ?? item?.turn_id);
+    return {
+        ...(threadId ? { thread_id: threadId } : {}),
+        ...(turnId ? { turn_id: turnId } : {})
+    };
+}
+
 function normalizeStringArray(value: unknown): string[] | null {
     if (!Array.isArray(value)) {
         return null;
@@ -191,6 +200,30 @@ export class AppServerEventConverter {
             return [event];
         }
 
+        if (msgType === 'thread_goal_updated') {
+            const goal = asRecord(msg.goal);
+            const threadId = asString(msg.thread_id ?? msg.threadId ?? goal?.threadId ?? goal?.thread_id);
+            const turnId = asString(msg.turn_id ?? msg.turnId);
+            if (!goal || !threadId) return [];
+            return [{
+                type: 'codex_goal_update',
+                thread_id: threadId,
+                ...(turnId ? { turn_id: turnId } : {}),
+                goal
+            }];
+        }
+
+        if (msgType === 'thread_goal_cleared') {
+            const threadId = asString(msg.thread_id ?? msg.threadId);
+            const turnId = asString(msg.turn_id ?? msg.turnId);
+            if (!threadId) return [];
+            return [{
+                type: 'codex_goal_cleared',
+                thread_id: threadId,
+                ...(turnId ? { turn_id: turnId } : {})
+            }];
+        }
+
         if (msgType === 'agent_message_delta' || msgType === 'agent_message_content_delta') {
             const itemId = asString(msg.item_id ?? msg.itemId ?? msg.id) ?? 'agent-message';
             const delta = asString(msg.delta ?? msg.text ?? msg.message);
@@ -281,6 +314,34 @@ export class AppServerEventConverter {
                     type: 'codex_thread_status',
                     thread_id: threadId,
                     status
+                });
+            }
+            return events;
+        }
+
+        if (method === 'thread/goal/updated') {
+            const goal = asRecord(paramsRecord.goal);
+            const threadId = asString(paramsRecord.threadId ?? paramsRecord.thread_id ?? goal?.threadId ?? goal?.thread_id);
+            const turnId = asString(paramsRecord.turnId ?? paramsRecord.turn_id);
+            if (goal && threadId) {
+                events.push({
+                    type: 'codex_goal_update',
+                    thread_id: threadId,
+                    ...(turnId ? { turn_id: turnId } : {}),
+                    goal
+                });
+            }
+            return events;
+        }
+
+        if (method === 'thread/goal/cleared') {
+            const threadId = asString(paramsRecord.threadId ?? paramsRecord.thread_id);
+            const turnId = asString(paramsRecord.turnId ?? paramsRecord.turn_id);
+            if (threadId) {
+                events.push({
+                    type: 'codex_goal_cleared',
+                    thread_id: threadId,
+                    ...(turnId ? { turn_id: turnId } : {})
                 });
             }
             return events;
@@ -435,7 +496,7 @@ export class AppServerEventConverter {
                     }
                     const text = extractItemText(item) ?? this.agentMessageBuffers.get(itemId);
                     if (text) {
-                        events.push({ type: 'agent_message', message: text });
+                        events.push({ type: 'agent_message', message: text, ...eventScope(paramsRecord, item) });
                         this.completedAgentMessageItems.add(itemId);
                         this.agentMessageBuffers.delete(itemId);
                     }
@@ -451,7 +512,7 @@ export class AppServerEventConverter {
                     }
                     const text = extractReasoningText(item) ?? this.reasoningBuffers.get(itemId);
                     if (text) {
-                        events.push({ type: 'agent_reasoning', text });
+                        events.push({ type: 'agent_reasoning', text, ...eventScope(paramsRecord, item) });
                         this.completedReasoningItems.add(itemId);
                         this.reasoningBuffers.delete(itemId);
                     }
@@ -474,6 +535,7 @@ export class AppServerEventConverter {
                     events.push({
                         type: 'exec_command_begin',
                         call_id: itemId,
+                        ...eventScope(paramsRecord, item),
                         ...meta
                     });
                 }
@@ -489,6 +551,7 @@ export class AppServerEventConverter {
                     events.push({
                         type: 'exec_command_end',
                         call_id: itemId,
+                        ...eventScope(paramsRecord, item),
                         ...meta,
                         ...(output ? { output } : {}),
                         ...(stderr ? { stderr } : {}),
@@ -517,6 +580,7 @@ export class AppServerEventConverter {
                     events.push({
                         type: 'patch_apply_begin',
                         call_id: itemId,
+                        ...eventScope(paramsRecord, item),
                         ...meta
                     });
                 }
@@ -530,6 +594,7 @@ export class AppServerEventConverter {
                     events.push({
                         type: 'patch_apply_end',
                         call_id: itemId,
+                        ...eventScope(paramsRecord, item),
                         ...meta,
                         ...(stdout ? { stdout } : {}),
                         ...(stderr ? { stderr } : {}),
@@ -552,6 +617,7 @@ export class AppServerEventConverter {
                 events.push({
                     type: 'codex_collaboration',
                     call_id: itemId,
+                    ...eventScope(paramsRecord, item),
                     ...(tool ? { tool } : {}),
                     ...(status ? { status } : {}),
                     ...(senderThreadId ? { sender_thread_id: senderThreadId } : {}),

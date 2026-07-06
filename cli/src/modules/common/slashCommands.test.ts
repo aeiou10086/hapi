@@ -121,6 +121,7 @@ describe('listSlashCommands', () => {
         expect(commands.find(cmd => cmd.name === 'global-codex')?.source).toBe('user')
         expect(commands.find(cmd => cmd.name === 'project-codex')?.source).toBe('project')
         expect(commands.find(cmd => cmd.name === 'compact')?.source).toBe('builtin')
+        expect(commands.find(cmd => cmd.name === 'goal')?.source).toBe('builtin')
     })
 
     it('returns empty project commands when project directory does not exist', async () => {

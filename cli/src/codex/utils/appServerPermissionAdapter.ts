@@ -10,6 +10,10 @@ type PermissionResult = {
     reason?: string;
 };
 
+type UserInputResult =
+    | { decision: 'accept'; answers: Record<string, string[]> | Record<string, { answers: string[] }> }
+    | { decision: 'decline' | 'cancel' };
+
 function asRecord(value: unknown): Record<string, unknown> | null {
     if (!value || typeof value !== 'object') {
         return null;
@@ -37,10 +41,7 @@ function mapDecision(decision: PermissionDecision): { decision: string } {
 export function registerAppServerPermissionHandlers(args: {
     client: CodexAppServerClient;
     permissionHandler: CodexPermissionHandler;
-    onUserInputRequest?: (request: { id: string; input: unknown }) => Promise<
-        | { decision: 'accept'; answers: Record<string, string[]> | Record<string, { answers: string[] }> }
-        | { decision: 'decline' | 'cancel' }
-    >;
+    onUserInputRequest?: (request: { id: string; input: unknown }) => Promise<UserInputResult>;
 }): void {
     const { client, permissionHandler, onUserInputRequest } = args;
 
@@ -100,6 +101,6 @@ export function registerAppServerPermissionHandlers(args: {
             return { decision: result.decision };
         }
 
-        return result;
+        return { answers: result.answers };
     });
 }

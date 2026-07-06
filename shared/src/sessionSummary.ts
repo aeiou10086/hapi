@@ -1,4 +1,4 @@
-import type { CodexCollaborationState, Session, WorktreeMetadata } from './schemas'
+import type { CodexCollaborationState, CodexGoalState, Session, WorktreeMetadata } from './schemas'
 
 export type SessionSummaryMetadata = {
     name?: string
@@ -22,6 +22,7 @@ export type SessionSummary = {
     model: string | null
     effort: string | null
     codexCollaborationState?: CodexCollaborationState
+    codexGoalState?: CodexGoalState
 }
 
 export function toSessionSummary(session: Session): SessionSummary {
@@ -58,6 +59,7 @@ export function toSessionSummary(session: Session): SessionSummary {
         pendingRequestsCount,
         model: session.model,
         effort: session.effort,
-        codexCollaborationState: session.codexCollaborationState
+        codexCollaborationState: session.codexCollaborationState,
+        codexGoalState: session.codexGoalState
     }
 }

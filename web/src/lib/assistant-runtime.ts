@@ -6,14 +6,16 @@ import { renderEventLabel } from '@/chat/presentation'
 import type { ChatBlock, CliOutputBlock } from '@/chat/types'
 import type { AgentEvent, ToolCallBlock } from '@/chat/types'
 import type { AttachmentMetadata, MessageStatus as HappyMessageStatus, Session } from '@/types/api'
+import type { CodexCollaborationState } from '@hapi/protocol/types'
 
 export type HappyChatMessageMetadata = {
-    kind: 'user' | 'assistant' | 'tool' | 'event' | 'cli-output'
+    kind: 'user' | 'assistant' | 'tool' | 'event' | 'cli-output' | 'codex-collaboration'
     status?: HappyMessageStatus
     localId?: string | null
     originalText?: string
     toolCallId?: string
     event?: AgentEvent
+    codexCollaborationState?: CodexCollaborationState
     source?: CliOutputBlock['source']
     attachments?: AttachmentMetadata[]
 }
@@ -86,6 +88,22 @@ function toThreadMessageLike(block: ChatBlock): ThreadMessageLike {
             content: [{ type: 'text', text: block.text }],
             metadata: {
                 custom: { kind: 'cli-output', source: block.source } satisfies HappyChatMessageMetadata
+            }
+        }
+    }
+
+    if (block.kind === 'codex-collaboration') {
+        const messageId = `codex-collaboration:${block.id}`
+        return {
+            role: 'assistant',
+            id: messageId,
+            createdAt: new Date(block.createdAt),
+            content: [{ type: 'text', text: '' }],
+            metadata: {
+                custom: {
+                    kind: 'codex-collaboration',
+                    codexCollaborationState: block.state
+                } satisfies HappyChatMessageMetadata
             }
         }
     }

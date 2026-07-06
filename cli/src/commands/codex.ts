@@ -38,6 +38,7 @@ export const codexCommand: CommandDefinition = {
             } = {}
             const unknownArgs: string[] = []
             let hasExplicitPermissionMode = false
+            let hasExplicitYolo = false
 
             for (let i = 0; i < commandArgs.length; i++) {
                 const arg = commandArgs[i]
@@ -61,6 +62,7 @@ export const codexCommand: CommandDefinition = {
                     hasExplicitPermissionMode = true
                 } else if ((arg === '--yolo' || arg === '--dangerously-bypass-approvals-and-sandbox') && !hasExplicitPermissionMode) {
                     options.permissionMode = 'yolo'
+                    hasExplicitYolo = true
                     unknownArgs.push(arg)
                 } else if (arg === '--model') {
                     const model = commandArgs[++i]
@@ -81,6 +83,9 @@ export const codexCommand: CommandDefinition = {
             }
             if (unknownArgs.length > 0) {
                 options.codexArgs = unknownArgs
+            }
+            if (!options.permissionMode && options.startedBy !== 'runner' && !hasExplicitYolo) {
+                options.permissionMode = 'yolo'
             }
 
             await initializeToken()

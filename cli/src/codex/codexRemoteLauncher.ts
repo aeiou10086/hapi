@@ -13,9 +13,10 @@ import type { CodexSession } from './session';
 import type { EnhancedMode } from './loop';
 import { hasCodexCliOverrides } from './utils/codexCliOverrides';
 import { AppServerEventConverter } from './utils/appServerEventConverter';
-import { CodexCollaborationStateTracker, type CodexCollaborationEvent, type CodexThreadStatusEvent } from './utils/collaborationState';
+import { CodexCollaborationStateTracker, type CodexCollaborationEvent, type CodexThreadActivityEvent, type CodexThreadStatusEvent } from './utils/collaborationState';
 import { registerAppServerPermissionHandlers } from './utils/appServerPermissionAdapter';
 import { buildThreadStartParams, buildTurnStartParams } from './utils/appServerConfig';
+import { normalizeCodexGoalState } from './utils/codexGoalState';
 import { shouldIgnoreTerminalEvent } from './utils/terminalEventGuard';
 import { expandCodexCustomSlashCommand, parseCodexBuiltinSlashCommand, type CodexBuiltinSlashCommand } from './utils/slashCommand';
 import {
@@ -26,6 +27,21 @@ import {
 
 type HappyServer = Awaited<ReturnType<typeof buildHapiMcpBridge>>['server'];
 type QueuedMessage = { message: string; mode: EnhancedMode; isolate: boolean; hash: string };
+
+function describeErrorForLog(error: unknown): Record<string, unknown> {
+    if (error instanceof Error) {
+        return {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+            cause: error.cause
+        };
+    }
+    if (error && typeof error === 'object') {
+        return error as Record<string, unknown>;
+    }
+    return { message: String(error) };
+}
 
 class CodexRemoteLauncher extends RemoteLauncherBase {
     private readonly session: CodexSession;
@@ -142,6 +158,10 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
 
         const asString = (value: unknown): string | null => {
             return typeof value === 'string' && value.length > 0 ? value : null;
+        };
+
+        const asNumber = (value: unknown): number | null => {
+            return typeof value === 'number' && Number.isFinite(value) ? value : null;
         };
 
         const normalizePatchChanges = (value: unknown): Record<string, unknown> => {
@@ -261,6 +281,96 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         let clearReadyAfterTurnTimer: (() => void) | null = null;
         let turnInFlight = false;
         let allowAnonymousTerminalEvent = false;
+        let completedCollaborationSnapshotEmitted = false;
+        let lastGoalAnnouncementSignature: string | null = null;
+        let goalCommandInFlight = false;
+
+        const goalAnnouncementSignature = (goal: Record<string, unknown> | null): string | null => {
+            if (!goal) {
+                return null;
+            }
+            const status = asString(goal.status) ?? '';
+            const objective = asString(goal.objective) ?? '';
+            return `${status}\n${objective}`;
+        };
+
+        const formatGoal = (goal: Record<string, unknown> | null, prefix = 'Goal'): string | null => {
+            if (!goal) {
+                return null;
+            }
+            const objective = asString(goal.objective);
+            const status = asString(goal.status);
+            const tokenBudget = goal.tokenBudget ?? goal.token_budget;
+            const tokensUsed = asNumber(goal.tokensUsed ?? goal.tokens_used);
+            const timeUsedSeconds = asNumber(goal.timeUsedSeconds ?? goal.time_used_seconds);
+            const lines = [
+                `${prefix}${status ? ` (${status})` : ''}:`,
+                objective ? objective : '(no objective)'
+            ];
+            const usage: string[] = [];
+            if (tokensUsed !== null) {
+                usage.push(`tokens used ${tokensUsed}`);
+            }
+            if (typeof tokenBudget === 'number') {
+                usage.push(`budget ${tokenBudget}`);
+            } else if (tokenBudget === null) {
+                usage.push('budget none');
+            }
+            if (timeUsedSeconds !== null) {
+                usage.push(`time ${timeUsedSeconds}s`);
+            }
+            if (usage.length > 0) {
+                lines.push(`Usage: ${usage.join(', ')}`);
+            }
+            if (status === 'blocked' || status === 'paused') {
+                lines.push('Use /goal resume to continue this goal.');
+            }
+            return lines.join('\n');
+        };
+
+        const announceGoalUpdate = (goal: Record<string, unknown> | null): void => {
+            if (!goal) {
+                return;
+            }
+            const signature = goalAnnouncementSignature(goal);
+            if (!signature) {
+                return;
+            }
+            if (goalCommandInFlight) {
+                lastGoalAnnouncementSignature = signature;
+                return;
+            }
+            if (signature === lastGoalAnnouncementSignature) {
+                return;
+            }
+            lastGoalAnnouncementSignature = signature;
+            const message = formatGoal(goal, 'Codex goal');
+            if (!message) {
+                return;
+            }
+            messageBuffer.addMessage(message, 'status');
+            session.sendAgentMessage({
+                type: 'message',
+                message,
+                id: randomUUID()
+            });
+        };
+
+        const publishCollaborationState = (state: ReturnType<CodexCollaborationStateTracker['reset']>): void => {
+            session.setCodexCollaborationState(state);
+            if (
+                state.status === 'completed'
+                && state.childThreadCount > 0
+                && !completedCollaborationSnapshotEmitted
+            ) {
+                completedCollaborationSnapshotEmitted = true;
+                session.sendAgentMessage({
+                    type: 'codex-collaboration-summary',
+                    state,
+                    id: randomUUID()
+                });
+            }
+        };
 
         const handleCodexEvent = (msg: Record<string, unknown>) => {
             const msgType = asString(msg.type);
@@ -274,11 +384,95 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 && Boolean(this.currentThreadId)
                 && eventThreadId !== this.currentThreadId;
 
+            const buildChildActivity = (): CodexThreadActivityEvent['activity'] | null => {
+                const now = Date.now();
+                if (msgType === 'agent_message') {
+                    const text = asString(msg.message);
+                    return text ? { id: randomUUID(), type: 'message', text, time: now } : null;
+                }
+                if (msgType === 'agent_reasoning') {
+                    const text = asString(msg.text);
+                    return text ? { id: randomUUID(), type: 'reasoning', text, time: now } : null;
+                }
+                if (msgType === 'exec_command_begin') {
+                    const command = normalizeCommand(msg.command) ?? 'command';
+                    return { id: randomUUID(), type: 'tool', tool: 'CodexBash', text: command, time: now };
+                }
+                if (msgType === 'exec_command_end') {
+                    const output = msg.output ?? msg.error ?? 'Command completed';
+                    return { id: randomUUID(), type: 'result', text: formatOutputPreview(output).substring(0, 240), time: now };
+                }
+                if (msgType === 'patch_apply_begin') {
+                    return { id: randomUUID(), type: 'tool', tool: 'CodexPatch', text: 'Applying file changes', time: now };
+                }
+                if (msgType === 'patch_apply_end') {
+                    const success = Boolean(msg.success);
+                    const stdout = asString(msg.stdout);
+                    const stderr = asString(msg.stderr);
+                    return {
+                        id: randomUUID(),
+                        type: 'result',
+                        text: success ? (stdout || 'Files modified successfully') : (stderr || 'Failed to modify files'),
+                        time: now
+                    };
+                }
+                if (msgType === 'mcp_tool_call_begin') {
+                    const invocation = asRecord(msg.invocation) ?? {};
+                    const name = buildMcpToolName(
+                        invocation.server ?? invocation.server_name ?? msg.server,
+                        invocation.tool ?? invocation.tool_name ?? msg.tool
+                    ) ?? 'MCP tool';
+                    return { id: randomUUID(), type: 'tool', tool: name, text: name, time: now };
+                }
+                if (msgType === 'task_started') {
+                    return { id: randomUUID(), type: 'status', text: 'Task started', time: now };
+                }
+                if (msgType === 'task_complete') {
+                    return { id: randomUUID(), type: 'status', text: 'Task completed', time: now };
+                }
+                if (msgType === 'turn_aborted') {
+                    return { id: randomUUID(), type: 'status', text: 'Turn aborted', time: now };
+                }
+                if (msgType === 'task_failed') {
+                    const error = asString(msg.error);
+                    return { id: randomUUID(), type: 'status', text: error ? `Task failed: ${error}` : 'Task failed', time: now };
+                }
+                return null;
+            };
+
+            const mirrorChildActivity = () => {
+                if (!eventThreadId || !this.currentThreadId || eventThreadId === this.currentThreadId) {
+                    return;
+                }
+                const activity = buildChildActivity();
+                if (!activity) {
+                    return;
+                }
+                const collaborationState = collaborationStateTracker.applyThreadActivity({
+                    thread_id: eventThreadId,
+                    activity,
+                    time: activity.time
+                });
+                if (collaborationState) {
+                    publishCollaborationState(collaborationState);
+                }
+            };
+
             if (isNonCurrentThreadLifecycle) {
+                mirrorChildActivity();
                 logger.debug(
                     `[Codex] Ignoring ${msgType} lifecycle event for non-current thread; ` +
                     `eventThread=${eventThreadId}, currentThread=${this.currentThreadId ?? 'none'}, ` +
                     `eventTurnId=${eventTurnId ?? 'none'}, activeTurn=${this.currentTurnId ?? 'none'}`
+                );
+                return;
+            }
+
+            mirrorChildActivity();
+            if (eventThreadId && this.currentThreadId && eventThreadId !== this.currentThreadId) {
+                logger.debug(
+                    `[Codex] Mirrored and suppressed child-thread event ${msgType}; ` +
+                    `eventThread=${eventThreadId}, currentThread=${this.currentThreadId}`
                 );
                 return;
             }
@@ -355,19 +549,37 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     ...(msg as CodexCollaborationEvent),
                     time: Date.now()
                 });
-                session.setCodexCollaborationState(collaborationState);
+                publishCollaborationState(collaborationState);
             } else if (msgType === 'codex_thread_status') {
                 const collaborationState = collaborationStateTracker.applyThreadStatus({
                     ...(msg as CodexThreadStatusEvent),
                     time: Date.now()
                 });
                 if (collaborationState) {
-                    session.setCodexCollaborationState(collaborationState);
+                    publishCollaborationState(collaborationState);
                 }
+            } else if (msgType === 'codex_goal_update') {
+                const goal = asRecord(msg.goal);
+                session.setCodexGoalState(normalizeCodexGoalState(goal));
+                announceGoalUpdate(goal);
+            } else if (msgType === 'codex_goal_cleared') {
+                session.setCodexGoalState(undefined);
+                lastGoalAnnouncementSignature = null;
+                if (goalCommandInFlight) {
+                    return;
+                }
+                const message = 'Codex goal cleared.';
+                messageBuffer.addMessage(message, 'status');
+                session.sendAgentMessage({
+                    type: 'message',
+                    message,
+                    id: randomUUID()
+                });
             }
 
             if (msgType === 'task_started') {
-                session.setCodexCollaborationState(collaborationStateTracker.reset(Date.now()));
+                completedCollaborationSnapshotEmitted = false;
+                publishCollaborationState(collaborationStateTracker.reset(Date.now()));
                 clearReadyAfterTurnTimer?.();
                 turnInFlight = true;
                 if (!eventTurnId && !this.currentTurnId) {
@@ -385,7 +597,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     logger.debug('thinking completed');
                     session.onThinkingChange(false);
                 }
-                session.setCodexCollaborationState(collaborationStateTracker.reset(Date.now()));
+                publishCollaborationState(collaborationStateTracker.reset(Date.now()));
                 diffProcessor.reset();
                 appServerEventConverter.reset();
             }
@@ -627,6 +839,15 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             });
         };
 
+        const syncCodexGoalStateForThread = async (threadId: string): Promise<void> => {
+            try {
+                const goalResponse = await appServerClient.getThreadGoal({ threadId });
+                session.setCodexGoalState(normalizeCodexGoalState(goalResponse.goal));
+            } catch (error) {
+                logger.debug('[Codex] Failed to sync thread goal state', describeErrorForLog(error));
+            }
+        };
+
         const ensureThread = async (messageMode: EnhancedMode): Promise<string> => {
             if (hasThread && this.currentThreadId) {
                 return this.currentThreadId;
@@ -676,6 +897,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             this.currentThreadId = threadId;
             session.onSessionFound(threadId);
             hasThread = true;
+            await syncCodexGoalStateForThread(threadId);
             return threadId;
         };
 
@@ -754,6 +976,113 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }
 
             const threadId = await ensureThread(messageMode);
+
+            if (command.kind === 'goal') {
+                if (command.action === 'show') {
+                    const goalResponse = await appServerClient.getThreadGoal({ threadId });
+                    const goal = asRecord(goalResponse.goal);
+                    sendCommandMessage(formatGoal(goal, 'Codex goal') ?? 'No Codex goal is currently set.');
+                    emitReadyIfIdle({
+                        pending,
+                        queueSize: () => session.queue.size(),
+                        shouldExit: this.shouldExit,
+                        sendReady
+                    });
+                    return;
+                }
+
+                if (command.action === 'clear') {
+                    goalCommandInFlight = true;
+                    try {
+                        await appServerClient.clearThreadGoal({ threadId });
+                    } finally {
+                        goalCommandInFlight = false;
+                    }
+                    session.setCodexGoalState(undefined);
+                    lastGoalAnnouncementSignature = null;
+                    sendCommandMessage('Codex goal cleared.');
+                    emitReadyIfIdle({
+                        pending,
+                        queueSize: () => session.queue.size(),
+                        shouldExit: this.shouldExit,
+                        sendReady
+                    });
+                    return;
+                }
+
+                if (command.action === 'pause' || command.action === 'resume') {
+                    const currentGoalResponse = await appServerClient.getThreadGoal({ threadId });
+                    const currentGoal = asRecord(currentGoalResponse.goal);
+                    const objective = asString(currentGoal?.objective);
+                    if (!objective) {
+                        sendCommandMessage('No Codex goal is currently set.');
+                        emitReadyIfIdle({
+                            pending,
+                            queueSize: () => session.queue.size(),
+                            shouldExit: this.shouldExit,
+                            sendReady
+                        });
+                        return;
+                    }
+                    const status = command.action === 'pause' ? 'paused' : 'active';
+                    const tokenBudget = currentGoal?.tokenBudget ?? currentGoal?.token_budget;
+                    const goalResponse = await (async () => {
+                        goalCommandInFlight = true;
+                        try {
+                            return await appServerClient.setThreadGoal({
+                                threadId,
+                                objective,
+                                ...(typeof tokenBudget === 'number' || tokenBudget === null ? { tokenBudget } : {}),
+                                status
+                            });
+                        } finally {
+                            goalCommandInFlight = false;
+                        }
+                    })();
+                    const goal = asRecord(goalResponse.goal);
+                    session.setCodexGoalState(normalizeCodexGoalState(goal));
+                    lastGoalAnnouncementSignature = goalAnnouncementSignature(goal);
+                    const message = formatGoal(
+                        goal,
+                        command.action === 'pause' ? 'Codex goal paused' : 'Codex goal resumed'
+                    ) ?? (command.action === 'pause' ? 'Codex goal paused.' : 'Codex goal resumed.');
+                    sendCommandMessage(message);
+                    emitReadyIfIdle({
+                        pending,
+                        queueSize: () => session.queue.size(),
+                        shouldExit: this.shouldExit,
+                        sendReady
+                    });
+                    return;
+                }
+
+                if (command.action === 'set' && command.objective) {
+                    const objective = command.objective;
+                    const goalResponse = await (async () => {
+                        goalCommandInFlight = true;
+                        try {
+                            return await appServerClient.setThreadGoal({
+                                threadId,
+                                objective
+                            });
+                        } finally {
+                            goalCommandInFlight = false;
+                        }
+                    })();
+                    const goal = asRecord(goalResponse.goal);
+                    session.setCodexGoalState(normalizeCodexGoalState(goal));
+                    lastGoalAnnouncementSignature = goalAnnouncementSignature(goal);
+                    const message = formatGoal(goal, 'Codex goal set') ?? `Codex goal set:\n${objective}`;
+                    sendCommandMessage(message);
+                    emitReadyIfIdle({
+                        pending,
+                        queueSize: () => session.queue.size(),
+                        shouldExit: this.shouldExit,
+                        sendReady
+                    });
+                    return;
+                }
+            }
 
             if (command.kind === 'compact') {
                 await appServerClient.compactThread({ threadId }, { signal: this.abortController.signal });
@@ -909,7 +1238,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     allowAnonymousTerminalEvent = true;
                 }
             } catch (error) {
-                logger.warn('Error in codex session:', error);
+                logger.warn('Error in codex session:', describeErrorForLog(error));
                 const isAbortError = error instanceof Error && error.name === 'AbortError';
                 turnInFlight = false;
                 allowAnonymousTerminalEvent = false;

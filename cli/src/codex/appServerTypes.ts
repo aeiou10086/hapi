@@ -183,6 +183,48 @@ export interface ThreadRollbackResponse {
     [key: string]: unknown;
 }
 
+export interface ThreadGoal {
+    threadId?: string;
+    objective?: string;
+    status?: string;
+    tokenBudget?: number | null;
+    tokensUsed?: number;
+    timeUsedSeconds?: number;
+    createdAt?: number;
+    updatedAt?: number;
+    [key: string]: unknown;
+}
+
+export interface ThreadGoalGetParams {
+    threadId: string;
+}
+
+export interface ThreadGoalGetResponse {
+    goal?: ThreadGoal | null;
+    [key: string]: unknown;
+}
+
+export interface ThreadGoalSetParams {
+    threadId: string;
+    objective: string;
+    tokenBudget?: number | null;
+    status?: string;
+}
+
+export interface ThreadGoalSetResponse {
+    goal?: ThreadGoal | null;
+    [key: string]: unknown;
+}
+
+export interface ThreadGoalClearParams {
+    threadId: string;
+}
+
+export interface ThreadGoalClearResponse {
+    goal?: ThreadGoal | null;
+    [key: string]: unknown;
+}
+
 export interface GitDiffToRemoteParams {
     cwd: string;
 }
