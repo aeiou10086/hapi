@@ -46,7 +46,6 @@ function getConnectionStatus(
     voiceStatus: ConversationStatus | undefined,
     backgroundTaskCount: number,
     codexCollaborationState: CodexCollaborationState | undefined,
-    codexGoalState: CodexGoalState | undefined,
     t: (key: string) => string
 ): { text: string; color: string; dotColor: string; isPulsing: boolean } {
     const hasPermissions = agentState?.requests && Object.keys(agentState.requests).length > 0
@@ -76,33 +75,6 @@ function getConnectionStatus(
             color: 'text-[#FF9500]',
             dotColor: 'bg-[#FF9500]',
             isPulsing: true
-        }
-    }
-
-    if (codexGoalState?.status === 'active') {
-        return {
-            text: `Pursuing goal${formatGoalElapsed(codexGoalState.timeUsedSeconds)}`,
-            color: 'text-[#007AFF]',
-            dotColor: 'bg-[#007AFF]',
-            isPulsing: true
-        }
-    }
-
-    if (codexGoalState?.status === 'paused') {
-        return {
-            text: `Goal paused${formatGoalElapsed(codexGoalState.timeUsedSeconds)}`,
-            color: 'text-amber-500',
-            dotColor: 'bg-[#FF9500]',
-            isPulsing: false
-        }
-    }
-
-    if (codexGoalState?.status === 'blocked') {
-        return {
-            text: `Goal blocked${formatGoalElapsed(codexGoalState.timeUsedSeconds)}`,
-            color: 'text-red-500',
-            dotColor: 'bg-red-500',
-            isPulsing: false
         }
     }
 
@@ -140,6 +112,31 @@ function getConnectionStatus(
         dotColor: 'bg-[#34C759]',
         isPulsing: false
     }
+}
+
+function getGoalStatus(codexGoalState: CodexGoalState | undefined): { text: string; color: string } | null {
+    if (codexGoalState?.status === 'active') {
+        return {
+            text: `Pursuing goal${formatGoalElapsed(codexGoalState.timeUsedSeconds)}`,
+            color: 'text-[#007AFF]'
+        }
+    }
+
+    if (codexGoalState?.status === 'paused') {
+        return {
+            text: `Goal paused${formatGoalElapsed(codexGoalState.timeUsedSeconds)}`,
+            color: 'text-amber-500'
+        }
+    }
+
+    if (codexGoalState?.status === 'blocked') {
+        return {
+            text: `Goal blocked${formatGoalElapsed(codexGoalState.timeUsedSeconds)}`,
+            color: 'text-red-500'
+        }
+    }
+
+    return null
 }
 
 function formatGoalElapsed(seconds: number | undefined): string {
@@ -188,8 +185,12 @@ export function StatusBar(props: {
 }) {
     const { t } = useTranslation()
     const connectionStatus = useMemo(
-        () => getConnectionStatus(props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount ?? 0, props.codexCollaborationState, props.codexGoalState, t),
-        [props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount, props.codexCollaborationState, props.codexGoalState, t]
+        () => getConnectionStatus(props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount ?? 0, props.codexCollaborationState, t),
+        [props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount, props.codexCollaborationState, t]
+    )
+    const goalStatus = useMemo(
+        () => getGoalStatus(props.codexGoalState),
+        [props.codexGoalState]
     )
 
     const contextWarning = useMemo(
@@ -231,6 +232,11 @@ export function StatusBar(props: {
                             {connectionStatus.text}
                         </span>
                     </div>
+                    {goalStatus ? (
+                        <span className={`text-xs ${goalStatus.color}`}>
+                            {goalStatus.text}
+                        </span>
+                    ) : null}
                     {contextWarning ? (
                         <span className={`text-[10px] ${contextWarning.color}`}>
                             {contextWarning.text}

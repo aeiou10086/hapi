@@ -51,10 +51,12 @@ describe('Codex collaboration panel', () => {
             }
         })
 
+        expect(screen.getByText('online')).toBeInTheDocument()
         expect(screen.getByText('Pursuing goal (20h 33m)')).toBeInTheDocument()
     })
 
     it('shows active Codex goal status while thinking', () => {
+        vi.spyOn(Math, 'random').mockReturnValue(0)
         renderStatusBar(undefined, {
             thinking: true,
             codexGoalState: {
@@ -65,7 +67,24 @@ describe('Codex collaboration panel', () => {
             }
         })
 
+        expect(screen.getByText('accomplishing…')).toBeInTheDocument()
         expect(screen.getByText('Pursuing goal (20h 33m)')).toBeInTheDocument()
+    })
+
+    it('keeps thinking visible beside a paused Codex goal', () => {
+        vi.spyOn(Math, 'random').mockReturnValue(0)
+        renderStatusBar(undefined, {
+            thinking: true,
+            codexGoalState: {
+                threadId: 'thread-1',
+                objective: 'Ship the MVP',
+                status: 'paused',
+                timeUsedSeconds: 120
+            }
+        })
+
+        expect(screen.getByText('accomplishing…')).toBeInTheDocument()
+        expect(screen.getByText('Goal paused (2m)')).toBeInTheDocument()
     })
 
     it('shows paused Codex goal status when idle', () => {
