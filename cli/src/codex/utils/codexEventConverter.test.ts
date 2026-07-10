@@ -113,4 +113,49 @@ describe('convertCodexEvent', () => {
             output: { ok: true }
         });
     });
+
+    it('converts apply_patch custom_tool_call items into CodexPatch tool calls', () => {
+        const patch = '*** Begin Patch\n*** Update File: src/foo.ts\n@@\n+test\n*** End Patch\n';
+        const result = convertCodexEvent({
+            type: 'response_item',
+            payload: {
+                type: 'custom_tool_call',
+                name: 'apply_patch',
+                call_id: 'call-patch',
+                input: patch
+            }
+        });
+
+        expect(result?.message).toMatchObject({
+            type: 'tool-call',
+            name: 'CodexPatch',
+            callId: 'call-patch',
+            input: {
+                changes: {
+                    'src/foo.ts': {
+                        path: 'src/foo.ts',
+                        kind: 'update',
+                        diff: patch
+                    }
+                }
+            }
+        });
+    });
+
+    it('converts custom_tool_call_output items', () => {
+        const result = convertCodexEvent({
+            type: 'response_item',
+            payload: {
+                type: 'custom_tool_call_output',
+                call_id: 'call-patch',
+                output: 'Success. Updated files.'
+            }
+        });
+
+        expect(result?.message).toMatchObject({
+            type: 'tool-call-result',
+            callId: 'call-patch',
+            output: 'Success. Updated files.'
+        });
+    });
 });

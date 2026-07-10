@@ -284,6 +284,37 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         let completedCollaborationSnapshotEmitted = false;
         let lastGoalAnnouncementSignature: string | null = null;
         let goalCommandInFlight = false;
+        let turnIdleResolvers: Array<() => void> = [];
+
+        const notifyTurnIdle = (): void => {
+            const resolvers = turnIdleResolvers;
+            turnIdleResolvers = [];
+            for (const resolve of resolvers) {
+                resolve();
+            }
+        };
+
+        const waitForTurnIdle = (signal: AbortSignal): Promise<void> => {
+            if (!turnInFlight || signal.aborted) {
+                return Promise.resolve();
+            }
+
+            return new Promise(resolve => {
+                let settled = false;
+                const finish = () => {
+                    if (settled) {
+                        return;
+                    }
+                    settled = true;
+                    signal.removeEventListener('abort', finish);
+                    turnIdleResolvers = turnIdleResolvers.filter(candidate => candidate !== finish);
+                    resolve();
+                };
+
+                turnIdleResolvers.push(finish);
+                signal.addEventListener('abort', finish, { once: true });
+            });
+        };
 
         const goalAnnouncementSignature = (goal: Record<string, unknown> | null): string | null => {
             if (!goal) {
@@ -593,6 +624,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (isTerminalEvent) {
                 turnInFlight = false;
                 allowAnonymousTerminalEvent = false;
+                notifyTurnIdle();
                 if (session.thinking) {
                     logger.debug('thinking completed');
                     session.onThinkingChange(false);
@@ -1165,6 +1197,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         const markIdleAfterAbort = () => {
             turnInFlight = false;
             allowAnonymousTerminalEvent = false;
+            notifyTurnIdle();
             clearReadyAfterTurnTimer?.();
             if (session.thinking) {
                 session.onThinkingChange(false);
@@ -1202,6 +1235,13 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
 
             if (!message) {
                 break;
+            }
+
+            if (turnInFlight) {
+                logger.debug('[Codex] Deferring queued message until current turn completes');
+                pending = message;
+                await waitForTurnIdle(this.abortController.signal);
+                continue;
             }
 
             messageBuffer.addMessage(message.message, 'user');
@@ -1281,6 +1321,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 }
             } finally {
                 if (!turnInFlight) {
+                    notifyTurnIdle();
                     permissionHandler.reset();
                     reasoningProcessor.abort();
                     diffProcessor.reset();

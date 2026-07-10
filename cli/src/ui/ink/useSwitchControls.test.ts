@@ -232,6 +232,32 @@ describe('useSwitchControls', () => {
         expect(latestState?.confirmationMode).toBe('switch');
     });
 
+    it('does not confirm switch from an immediate duplicate space event', async () => {
+        const onSwitch = vi.fn();
+        await mount({ onSwitch });
+
+        await triggerInput(' ', {});
+        expect(latestState?.confirmationMode).toBe('switch');
+
+        await triggerInputWithTimers(' ', {}, 100);
+        expect(latestState?.confirmationMode).toBe('switch');
+        expect(latestState?.actionInProgress).toBe(null);
+        expect(onSwitch).not.toHaveBeenCalled();
+    });
+
+    it('confirms switch when the second space is a separate press', async () => {
+        const onSwitch = vi.fn();
+        await mount({ onSwitch });
+
+        await triggerInput(' ', {});
+        expect(latestState?.confirmationMode).toBe('switch');
+
+        await advanceTimers(125);
+        await triggerInputWithTimers(' ', {}, 100);
+        expect(latestState?.actionInProgress).toBe('switching');
+        expect(onSwitch).toHaveBeenCalledTimes(1);
+    });
+
     it('ignores key-release sequences from key.sequence', async () => {
         const onSwitch = vi.fn();
         await mount({ onSwitch });

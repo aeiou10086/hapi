@@ -91,6 +91,79 @@ function extractCallId(payload: Record<string, unknown>): string | null {
     return null;
 }
 
+function normalizeCustomToolInput(payload: Record<string, unknown>): unknown {
+    if (Object.prototype.hasOwnProperty.call(payload, 'input')) {
+        return { input: payload.input };
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'arguments')) {
+        return parseArguments(payload.arguments);
+    }
+    return {};
+}
+
+function extractApplyPatchChanges(patch: string): Record<string, unknown> {
+    const lines = patch.split('\n');
+    const headers: Array<{
+        lineIndex: number;
+        kind: 'add' | 'update' | 'delete' | 'move';
+        path: string;
+        oldPath?: string;
+    }> = [];
+
+    for (let index = 0; index < lines.length; index++) {
+        const line = lines[index];
+        const fileMatch = line.match(/^\*\*\* (Add|Update|Delete) File: (.+)$/);
+        if (fileMatch) {
+            headers.push({
+                lineIndex: index,
+                kind: fileMatch[1].toLowerCase() as 'add' | 'update' | 'delete',
+                path: fileMatch[2].trim()
+            });
+            continue;
+        }
+
+        const moveMatch = line.match(/^\*\*\* Move to: (.+)$/);
+        const previousHeader = headers.at(-1);
+        if (moveMatch && previousHeader) {
+            previousHeader.oldPath = previousHeader.path;
+            previousHeader.path = moveMatch[1].trim();
+            previousHeader.kind = 'move';
+        }
+    }
+
+    const changes: Record<string, unknown> = {};
+    for (let index = 0; index < headers.length; index++) {
+        const header = headers[index];
+        const nextHeader = headers[index + 1];
+        const start = Math.max(0, header.lineIndex - 1);
+        const end = nextHeader ? Math.max(start + 1, nextHeader.lineIndex - 1) : lines.length;
+        changes[header.path] = {
+            path: header.path,
+            kind: header.kind,
+            diff: lines.slice(start, end).join('\n'),
+            ...(header.oldPath ? { oldPath: header.oldPath } : {})
+        };
+    }
+
+    return changes;
+}
+
+function normalizeCustomTool(name: string, payload: Record<string, unknown>): { name: string; input: unknown } {
+    if (name === 'apply_patch' && typeof payload.input === 'string') {
+        return {
+            name: 'CodexPatch',
+            input: {
+                changes: extractApplyPatchChanges(payload.input)
+            }
+        };
+    }
+
+    return {
+        name,
+        input: normalizeCustomToolInput(payload)
+    };
+}
+
 export function convertCodexEvent(rawEvent: unknown): CodexConversionResult | null {
     const parsed = CodexSessionEventSchema.safeParse(rawEvent);
     if (!parsed.success) {
@@ -211,7 +284,40 @@ export function convertCodexEvent(rawEvent: unknown): CodexConversionResult | nu
             };
         }
 
+        if (itemType === 'custom_tool_call') {
+            const name = asString(payloadRecord.name);
+            const callId = extractCallId(payloadRecord);
+            if (!name || !callId) {
+                return null;
+            }
+            const tool = normalizeCustomTool(name, payloadRecord);
+            return {
+                message: {
+                    type: 'tool-call',
+                    name: tool.name,
+                    callId,
+                    input: tool.input,
+                    id: randomUUID()
+                }
+            };
+        }
+
         if (itemType === 'function_call_output') {
+            const callId = extractCallId(payloadRecord);
+            if (!callId) {
+                return null;
+            }
+            return {
+                message: {
+                    type: 'tool-call-result',
+                    callId,
+                    output: payloadRecord.output,
+                    id: randomUUID()
+                }
+            };
+        }
+
+        if (itemType === 'custom_tool_call_output') {
             const callId = extractCallId(payloadRecord);
             if (!callId) {
                 return null;

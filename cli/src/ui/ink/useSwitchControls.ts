@@ -10,6 +10,8 @@ type ExtendedKey = Key & {
 export type ConfirmationMode = 'exit' | 'switch' | null;
 export type ActionInProgress = 'exiting' | 'switching' | null;
 
+const SWITCH_CONFIRM_GUARD_MS = 125;
+
 export function useSwitchControls(opts: {
     onExit?: () => void;
     onSwitch?: () => void;
@@ -21,11 +23,13 @@ export function useSwitchControls(opts: {
     const [confirmationMode, setConfirmationMode] = useState<ConfirmationMode>(null);
     const [actionInProgress, setActionInProgress] = useState<ActionInProgress>(null);
     const confirmationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const switchConfirmationStartedAtRef = useRef<number | null>(null);
     const { onExit, onSwitch } = opts;
     const confirmationTimeoutMs = opts.confirmationTimeoutMs ?? 15000;
 
     const resetConfirmation = useCallback(() => {
         setConfirmationMode(null);
+        switchConfirmationStartedAtRef.current = null;
         if (confirmationTimeoutRef.current) {
             clearTimeout(confirmationTimeoutRef.current);
             confirmationTimeoutRef.current = null;
@@ -34,6 +38,7 @@ export function useSwitchControls(opts: {
 
     const setConfirmationWithTimeout = useCallback((mode: Exclude<ConfirmationMode, null>) => {
         setConfirmationMode(mode);
+        switchConfirmationStartedAtRef.current = mode === 'switch' ? Date.now() : null;
         if (confirmationTimeoutRef.current) {
             clearTimeout(confirmationTimeoutRef.current);
         }
@@ -101,6 +106,13 @@ export function useSwitchControls(opts: {
 
         if (isSpace) {
             if (confirmationMode === 'switch') {
+                const switchConfirmationStartedAt = switchConfirmationStartedAtRef.current;
+                if (
+                    switchConfirmationStartedAt !== null
+                    && Date.now() - switchConfirmationStartedAt < SWITCH_CONFIRM_GUARD_MS
+                ) {
+                    return;
+                }
                 resetConfirmation();
                 setActionInProgress('switching');
                 await new Promise(resolve => setTimeout(resolve, 100));

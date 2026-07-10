@@ -24,7 +24,10 @@ const harness = vi.hoisted(() => ({
     emitChildTurnLifecycleDuringParent: false,
     emitChildMessageDuringCollab: false,
     childCollaborationStatus: 'notLoaded',
-    turnNotifications: [] as Array<{ method: string; params: unknown }>
+    turnNotifications: [] as Array<{ method: string; params: unknown }>,
+    deferTurnCompletion: false,
+    deferredTurnCompletions: [] as Array<() => void>,
+    nextTurnNumber: 0
 }));
 
 vi.mock('./codexAppServerClient', () => {
@@ -57,7 +60,8 @@ vi.mock('./codexAppServerClient', () => {
 
         async startTurn(params: unknown): Promise<{ turn: { id?: string } }> {
             harness.startTurnCalls.push(params);
-            const turnId = 'turn-current';
+            harness.nextTurnNumber += 1;
+            const turnId = `turn-current-${harness.nextTurnNumber}`;
             const started = { threadId: 'thread-anonymous', turn: harness.turnStartedIncludesId ? { id: turnId } : {} };
             harness.notifications.push({ method: 'turn/started', params: started });
             this.notificationHandler?.('turn/started', started);
@@ -109,9 +113,16 @@ vi.mock('./codexAppServerClient', () => {
                 }
             }
 
-            const completed = { threadId: 'thread-anonymous', status: 'Completed', turn: harness.turnCompletedIncludesId ? { id: turnId } : {} };
-            harness.notifications.push({ method: 'turn/completed', params: completed });
-            this.notificationHandler?.('turn/completed', completed);
+            const completeTurn = () => {
+                const completed = { threadId: 'thread-anonymous', status: 'Completed', turn: harness.turnCompletedIncludesId ? { id: turnId } : {} };
+                harness.notifications.push({ method: 'turn/completed', params: completed });
+                this.notificationHandler?.('turn/completed', completed);
+            };
+            if (harness.deferTurnCompletion) {
+                harness.deferredTurnCompletions.push(completeTurn);
+            } else {
+                completeTurn();
+            }
 
             return { turn: harness.startTurnReturnsId ? { id: turnId } : {} };
         }
@@ -174,10 +185,32 @@ function createMode(overrides: Partial<EnhancedMode> = {}): EnhancedMode {
     };
 }
 
-function createSessionStub(initialMessage = 'hello from launcher test', mode = createMode()) {
+async function settleMicrotasks(): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, 0));
+}
+
+async function waitForCondition(assertion: () => boolean, timeoutMs = 1000): Promise<void> {
+    const startedAt = Date.now();
+    while (!assertion()) {
+        if (Date.now() - startedAt > timeoutMs) {
+            throw new Error('Timed out waiting for condition');
+        }
+        await settleMicrotasks();
+    }
+}
+
+function createSessionStub(
+    initialMessage: string | string[] = 'hello from launcher test',
+    mode = createMode(),
+    closeQueue = true
+) {
     const queue = new MessageQueue2<EnhancedMode>((mode) => JSON.stringify(mode));
-    queue.push(initialMessage, mode);
-    queue.close();
+    for (const message of Array.isArray(initialMessage) ? initialMessage : [initialMessage]) {
+        queue.push(message, mode);
+    }
+    if (closeQueue) {
+        queue.close();
+    }
 
     const sessionEvents: Array<{ type: string; [key: string]: unknown }> = [];
     const codexMessages: unknown[] = [];
@@ -291,6 +324,9 @@ describe('codexRemoteLauncher', () => {
         harness.emitChildMessageDuringCollab = false;
         harness.childCollaborationStatus = 'notLoaded';
         harness.turnNotifications = [];
+        harness.deferTurnCompletion = false;
+        harness.deferredTurnCompletions = [];
+        harness.nextTurnNumber = 0;
     });
 
     it('finishes a turn and emits ready when task lifecycle events omit turn_id', async () => {
@@ -424,6 +460,39 @@ describe('codexRemoteLauncher', () => {
 
         expect(thinkingChanges).toEqual([true, false]);
         expect(session.thinking).toBe(false);
+    });
+
+    it('waits for the current turn to complete before starting queued follow-up messages', async () => {
+        harness.turnStartedIncludesId = true;
+        harness.turnCompletedIncludesId = true;
+        harness.startTurnReturnsId = true;
+        harness.deferTurnCompletion = true;
+
+        const mode = createMode();
+        const { session, thinkingChanges } = createSessionStub('first message', mode, false);
+
+        const launchPromise = codexRemoteLauncher(session as never);
+
+        await waitForCondition(() => harness.startTurnCalls.length === 1);
+        expect(session.thinking).toBe(true);
+        expect(harness.deferredTurnCompletions).toHaveLength(1);
+
+        session.queue.push('queued follow-up', mode);
+        session.queue.close();
+        await settleMicrotasks();
+        expect(harness.startTurnCalls).toHaveLength(1);
+
+        harness.deferredTurnCompletions.shift()?.();
+        await waitForCondition(() => harness.startTurnCalls.length === 2);
+        expect(thinkingChanges).toEqual([true, false, true]);
+
+        harness.deferredTurnCompletions.shift()?.();
+        const exitReason = await launchPromise;
+
+        expect(exitReason).toBe('exit');
+        expect(session.thinking).toBe(false);
+        expect(thinkingChanges).toEqual([true, false, true, false]);
+        expect(harness.startTurnCalls).toHaveLength(2);
     });
 
     it('mirrors child thread messages into collaboration state while preserving the turn', async () => {

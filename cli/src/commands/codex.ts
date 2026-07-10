@@ -2,6 +2,9 @@ import chalk from 'chalk'
 import { authAndSetupMachineIfNeeded } from '@/ui/auth'
 import { initializeToken } from '@/ui/tokenInit'
 import { maybeAutoStartServer } from '@/utils/autoStartServer'
+import { isRunnerRunningCurrentlyInstalledHappyVersion } from '@/runner/controlClient'
+import { spawnHappyCLI } from '@/utils/spawnHappyCLI'
+import { logger } from '@/ui/logger'
 import type { CommandDefinition } from './types'
 import { CODEX_PERMISSION_MODES } from '@hapi/protocol/modes'
 import type { CodexPermissionMode } from '@hapi/protocol/types'
@@ -91,6 +94,19 @@ export const codexCommand: CommandDefinition = {
             await initializeToken()
             await maybeAutoStartServer()
             await authAndSetupMachineIfNeeded()
+            if (options.startedBy !== 'runner') {
+                logger.debug('Ensuring hapi background service is running & matches our version...')
+                if (!(await isRunnerRunningCurrentlyInstalledHappyVersion())) {
+                    logger.debug('Starting hapi background service...')
+                    const runnerProcess = spawnHappyCLI(['runner', 'start-sync'], {
+                        detached: true,
+                        stdio: 'ignore',
+                        env: process.env
+                    })
+                    runnerProcess.unref()
+                    await new Promise(resolve => setTimeout(resolve, 200))
+                }
+            }
             await runCodex(options)
         } catch (error) {
             console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error')
