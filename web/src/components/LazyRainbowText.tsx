@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
+import { MARKDOWN_PARAGRAPH_CLASS_NAME } from '@/components/assistant-ui/markdown-text'
 
 // 特效单词列表 - 可以轻松扩展
 const RAINBOW_WORDS = [
@@ -129,7 +130,7 @@ export function LazyRainbowText(props: { text: string }) {
 
     const rainbowComponents = useMemo(() => ({
         p: ({ children }: { children?: React.ReactNode }) => (
-            <p>{processChildrenForRainbow(children)}</p>
+            <p className={MARKDOWN_PARAGRAPH_CLASS_NAME}>{processChildrenForRainbow(children)}</p>
         ),
     }), [])
 

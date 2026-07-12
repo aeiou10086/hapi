@@ -24,6 +24,7 @@ import type { MarkdownTextPrimitiveProps } from '@assistant-ui/react-markdown'
 // both benefit from preserving newlines that the sender visibly typed.
 export const MARKDOWN_PLUGINS = [remarkGfm, remarkStripCjkAutolink, remarkMath, remarkDisableIndentedCode, remarkBreaks] satisfies NonNullable<MarkdownTextPrimitiveProps['remarkPlugins']>
 export const MARKDOWN_REHYPE_PLUGINS = [rehypeKatex] satisfies NonNullable<MarkdownTextPrimitiveProps['rehypePlugins']>
+export const MARKDOWN_PARAGRAPH_CLASS_NAME = 'aui-md-p mt-6 first:mt-0 leading-relaxed'
 
 function CodeHeader(props: CodeHeaderProps) {
     const { copied, copy } = useCopyToClipboard()
@@ -98,7 +99,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
 }
 
 function Paragraph(props: ComponentPropsWithoutRef<'p'>) {
-    return <p {...props} className={cn('aui-md-p leading-relaxed', props.className)} />
+    return <p {...props} className={cn(MARKDOWN_PARAGRAPH_CLASS_NAME, props.className)} />
 }
 
 function Blockquote(props: ComponentPropsWithoutRef<'blockquote'>) {
