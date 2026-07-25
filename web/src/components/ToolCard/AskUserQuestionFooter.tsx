@@ -166,7 +166,10 @@ export function AskUserQuestionFooter(props: {
                     setStep(i)
                     return
                 }
-                answers[String(i)] = a
+                // Key by question text — the claude binary's mapToolResultToToolResultBlockParam
+                // looks up answers via answers[questionText], so an index key is never matched and
+                // the tool result silently becomes "The user did not answer the questions."
+                answers[questions[i].question] = a
             }
         }
 
