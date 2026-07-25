@@ -40,6 +40,44 @@ function getString(value: unknown): string | null {
     return typeof value === 'string' && value.length > 0 ? value : null
 }
 
+// Claude Code 的 JSONL 把一个 assistant message 的每个 content block(以及被
+// streaming 拆开的同一段 text 的多个 chunk)各落成单独一行,共享同一个 Anthropic
+// message.id。用 message.id + 内容指纹做 identity,使得:
+//  - 同一个 chunk 的 null(CLI 实时推送)和 tw(JSONL 同步)两版内容一致 → 同 identity → 去重;
+//  - 同一段 text 被拆开的不同 chunk / 同一 message 下的不同 block → 不同 identity → 各自保留。
+function fingerprintText(text: string): string {
+    if (text.length === 0) return '0'
+    let hash = 5381
+    for (let i = 0; i < text.length; i++) {
+        hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0
+    }
+    return `${text.length}:${(hash >>> 0).toString(36)}`
+}
+
+function getAssistantBlockKey(message: unknown): string | null {
+    if (!isObject(message)) return null
+    const content = (message as { content?: unknown }).content
+    if (typeof content === 'string') {
+        return `text:${fingerprintText(content)}`
+    }
+    if (!Array.isArray(content) || content.length === 0) return null
+    // hapi 每个 DB 行对应 Claude Code JSONL 的一个 content block,这里只看第一个。
+    const block = content[0]
+    if (!isObject(block) || typeof block.type !== 'string') return null
+    if (block.type === 'tool_use' && typeof block.id === 'string') {
+        return `tool_use:${block.id}`
+    }
+    if (block.type === 'text' && typeof block.text === 'string') {
+        return `text:${fingerprintText(block.text)}`
+    }
+    if (block.type === 'thinking') {
+        const thinking = typeof block.thinking === 'string' ? block.thinking : ''
+        const signature = typeof block.signature === 'string' ? block.signature : ''
+        return `thinking:${fingerprintText(signature || thinking)}`
+    }
+    return `block:${block.type}`
+}
+
 function getAgentMessageIdentity(msg: DecryptedMessage): string | null {
     if (msg.localId) {
         return `local:${msg.localId}`
@@ -65,7 +103,10 @@ function getAgentMessageIdentity(msg: DecryptedMessage): string | null {
         if (data.type === 'assistant' && isObject(data.message)) {
             const messageId = getString(data.message.id)
             if (messageId) {
-                return `agent-output-message:${messageId}`
+                const blockKey = getAssistantBlockKey(data.message)
+                return blockKey
+                    ? `agent-output-message:${messageId}:${blockKey}`
+                    : `agent-output-message:${messageId}`
             }
         }
 
