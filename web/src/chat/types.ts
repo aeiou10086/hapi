@@ -87,6 +87,7 @@ export type NormalizedMessage = ({
     usage?: UsageData
     status?: MessageStatus
     originalText?: string
+    messageId?: string
 }
 
 export type ToolPermission = {

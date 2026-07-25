@@ -45,6 +45,7 @@ function normalizeAssistantOutput(
 
     const message = isObject(data.message) ? data.message : null
     if (!message) return null
+    const anthropicMessageId = asString(message.id) ?? undefined
 
     const modelContent = message.content
     const blocks: NormalizedAgentContent[] = []
@@ -83,6 +84,7 @@ function normalizeAssistantOutput(
         isSidechain,
         content: blocks,
         meta,
+        messageId: anthropicMessageId,
         usage: inputTokens !== null && outputTokens !== null ? {
             input_tokens: inputTokens,
             output_tokens: outputTokens,

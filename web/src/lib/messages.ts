@@ -2,6 +2,7 @@ import type { InfiniteData } from '@tanstack/react-query'
 import { AGENT_MESSAGE_PAYLOAD_TYPE, isObject } from '@hapi/protocol'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { DecryptedMessage, MessagesResponse } from '@/types/api'
+import type { NormalizedAgentContent, NormalizedMessage, UsageData } from '@/chat/types'
 
 export function makeClientSideId(prefix: string): string {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -243,4 +244,97 @@ export function upsertMessagesInCache(
         ...data,
         pages,
     }
+}
+
+// Claude Code 的 JSONL 把一个 assistant message 的每个 content block(以及被 streaming
+// 拆开的同一段 text 的多个 chunk)各落成单独一行,共享同一个 Anthropic message.id。
+// mergeMessages 现在按 message.id+内容指纹保留每一行,但它们仍是独立的 NormalizedMessage
+// —— 直接渲染会让同一段 text 被中间的 tool_use 卡截断。这里把同一个 message.id 的多个
+// agent 消息合并成一条:text chunks 按 seq 拼接,tool_use/tool_result 按 id 去重,block
+// 顺序还原成 Claude 的真实输出(reasoning → text → tool_use)。
+function mergeAgentMessageGroup(group: NormalizedMessage[]): NormalizedMessage {
+    const base = group[0]
+    const reasoningParts: string[] = []
+    const textParts: string[] = []
+    const toolUses = new Map<string, NormalizedAgentContent>()
+    const toolResults = new Map<string, NormalizedAgentContent>()
+    const others: NormalizedAgentContent[] = []
+    let usage: UsageData | undefined
+
+    for (const msg of group) {
+        if (msg.usage) usage = msg.usage
+        const blocks = msg.content as NormalizedAgentContent[]
+        for (const block of blocks) {
+            switch (block.type) {
+                case 'reasoning':
+                    reasoningParts.push(block.text)
+                    break
+                case 'text':
+                    textParts.push(block.text)
+                    break
+                case 'tool-call':
+                    toolUses.set(block.id, block)
+                    break
+                case 'tool-result':
+                    toolResults.set(block.tool_use_id, block)
+                    break
+                default:
+                    others.push(block)
+            }
+        }
+    }
+
+    const content: NormalizedAgentContent[] = []
+    if (reasoningParts.length > 0) {
+        content.push({ type: 'reasoning', text: reasoningParts.join(''), uuid: base.id, parentUUID: null })
+    }
+    if (textParts.length > 0) {
+        content.push({ type: 'text', text: textParts.join(''), uuid: base.id, parentUUID: null })
+    }
+    for (const block of toolUses.values()) content.push(block)
+    for (const block of toolResults.values()) content.push(block)
+    for (const block of others) content.push(block)
+
+    return {
+        id: base.id,
+        localId: base.localId,
+        createdAt: base.createdAt,
+        role: 'agent',
+        isSidechain: base.isSidechain,
+        meta: base.meta,
+        messageId: base.messageId,
+        status: base.status,
+        originalText: base.originalText,
+        content,
+        usage,
+    }
+}
+
+export function coalesceAgentMessages(messages: NormalizedMessage[]): NormalizedMessage[] {
+    const groups = new Map<string, NormalizedMessage[]>()
+    const standalone: NormalizedMessage[] = []
+    const order: string[] = []
+
+    for (const msg of messages) {
+        if (msg.role === 'agent' && !msg.isSidechain && msg.messageId) {
+            const existing = groups.get(msg.messageId)
+            if (existing) {
+                existing.push(msg)
+            } else {
+                groups.set(msg.messageId, [msg])
+                order.push(msg.messageId)
+            }
+        } else {
+            standalone.push(msg)
+        }
+    }
+
+    if (groups.size === 0) return messages
+
+    const result: NormalizedMessage[] = [...standalone]
+    for (const mid of order) {
+        result.push(mergeAgentMessageGroup(groups.get(mid)!))
+    }
+    result.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+    return result
 }

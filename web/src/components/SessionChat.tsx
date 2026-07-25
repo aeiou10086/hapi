@@ -13,6 +13,7 @@ import type {
 import type { ChatBlock, NormalizedMessage } from '@/chat/types'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
+import { coalesceAgentMessages } from '@/lib/messages'
 import { reduceChatBlocks } from '@/chat/reducer'
 import { reconcileChatBlocks } from '@/chat/reconcile'
 import { HappyComposer } from '@/components/AssistantChat/HappyComposer'
@@ -203,7 +204,7 @@ export function SessionChat(props: {
                 cache.delete(id)
             }
         }
-        return normalized
+        return coalesceAgentMessages(normalized)
     }, [props.messages])
 
     const reduced = useMemo(

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DecryptedMessage } from '@/types/api'
-import { mergeMessages } from './messages'
+import { coalesceAgentMessages, mergeMessages } from './messages'
+import type { NormalizedMessage } from '@/chat/types'
 
 function msg(id: string, seq: number, content: unknown): DecryptedMessage {
     return {
@@ -184,5 +185,44 @@ describe('mergeMessages', () => {
 
         // 同一个 chunk 的 null(CLI 实时推)和 tw(JSONL 同步)两版内容一致,只留一条。
         expect(mergeMessages([], [cliCopy, jsonlCopy])).toEqual([jsonlCopy])
+    })
+})
+
+describe('coalesceAgentMessages', () => {
+    function agentMsg(id: string, mid: string, content: unknown, seq: number): NormalizedMessage {
+        return {
+            id,
+            localId: null,
+            createdAt: seq,
+            role: 'agent',
+            isSidechain: false,
+            content: content as NormalizedMessage['content'],
+            messageId: mid,
+        }
+    }
+
+    it('joins text chunks split across tool_use by streaming, ordering text before the tool call', () => {
+        // Claude Code JSONL 落盘顺序: text前半, tool_use, text后半 —— 共享同一个 Anthropic message.id。
+        const chunks: NormalizedMessage[] = [
+            agentMsg('a', 'msg_shared', [{ type: 'text', text: '前半(', uuid: 'a', parentUUID: null }], 1),
+            agentMsg('b', 'msg_shared', [{ type: 'tool-call', id: 'tu1', name: 'Read', input: {}, description: null, uuid: 'b', parentUUID: null }], 2),
+            agentMsg('c', 'msg_shared', [{ type: 'text', text: '后半)', uuid: 'c', parentUUID: null }], 3),
+        ]
+
+        const result = coalesceAgentMessages(chunks)
+
+        expect(result).toHaveLength(1)
+        const content = result[0].content as Array<{ type: string; text?: string; name?: string }>
+        expect(content[0]).toMatchObject({ type: 'text', text: '前半(后半)' })
+        expect(content[1]).toMatchObject({ type: 'tool-call', name: 'Read' })
+    })
+
+    it('leaves messages without a shared message id untouched', () => {
+        const a = agentMsg('a', '', [{ type: 'text', text: 'hi', uuid: 'a', parentUUID: null }], 1)
+        const b = agentMsg('b', '', [{ type: 'text', text: 'yo', uuid: 'b', parentUUID: null }], 2)
+
+        const result = coalesceAgentMessages([a, b])
+
+        expect(result).toHaveLength(2)
     })
 })
