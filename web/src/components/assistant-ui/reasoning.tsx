@@ -60,11 +60,9 @@ export const ReasoningGroup: FC<PropsWithChildren> = ({ children }) => {
         && message.content.length > 0
         && message.content[message.content.length - 1]?.type === 'reasoning'
 
-    // Auto-expand while streaming
+    // Fold by default; auto-expand only while streaming, then collapse when it finishes.
     useEffect(() => {
-        if (isStreaming) {
-            setIsOpen(true)
-        }
+        setIsOpen(isStreaming)
     }, [isStreaming])
 
     return (
