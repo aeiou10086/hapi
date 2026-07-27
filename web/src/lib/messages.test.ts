@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { DecryptedMessage } from '@/types/api'
 import { coalesceAgentMessages, mergeMessages } from './messages'
-import type { NormalizedMessage } from '@/chat/types'
+import type { NormalizedAgentContent, NormalizedMessage } from '@/chat/types'
 
-function msg(id: string, seq: number, content: unknown): DecryptedMessage {
+function msg(id: string, seq: number, content: unknown, localId: string | null = null): DecryptedMessage {
     return {
         id,
         seq,
-        localId: null,
+        localId,
         createdAt: seq,
         content,
     }
@@ -181,7 +181,7 @@ describe('mergeMessages', () => {
                     }
                 }
             }
-        })
+        }, 'tw:jsonl-uuid')
 
         // 同一个 chunk 的 null(CLI 实时推)和 tw(JSONL 同步)两版内容一致,只留一条。
         expect(mergeMessages([], [cliCopy, jsonlCopy])).toEqual([jsonlCopy])
@@ -196,7 +196,7 @@ describe('coalesceAgentMessages', () => {
             createdAt: seq,
             role: 'agent',
             isSidechain: false,
-            content: content as NormalizedMessage['content'],
+            content: content as NormalizedAgentContent[],
             messageId: mid,
         }
     }

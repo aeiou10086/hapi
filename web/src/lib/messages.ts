@@ -80,7 +80,13 @@ function getAssistantBlockKey(message: unknown): string | null {
 }
 
 function getAgentMessageIdentity(msg: DecryptedMessage): string | null {
-    if (msg.localId) {
+    // Only web-side optimistic bubbles carry a `local-` localId and need matching
+    // against their stored echo. Agent outputs come with null (CLI push) or
+    // `tw:`/`backfill:` (transcript sync) localIds — these must fall through to the
+    // message-id identity below, otherwise the null and tw copies of the same chunk
+    // get different identities, both survive, and coalesceAgentMessages joins them
+    // into duplicated text.
+    if (msg.localId && msg.localId.startsWith('local-')) {
         return `local:${msg.localId}`
     }
 
