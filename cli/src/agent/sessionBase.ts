@@ -41,6 +41,7 @@ export class AgentSessionBase<Mode> {
 
     sessionId: string | null;
     mode: 'local' | 'remote' = 'local';
+    hasEnteredRemoteMode: boolean = false;
     thinking: boolean = false;
 
     private sessionFoundCallbacks: ((sessionId: string) => void)[] = [];
@@ -68,6 +69,7 @@ export class AgentSessionBase<Mode> {
         this.sessionLabel = opts.sessionLabel;
         this.sessionIdLabel = opts.sessionIdLabel;
         this.mode = opts.mode ?? 'local';
+        this.hasEnteredRemoteMode = this.mode === 'remote';
         this.permissionMode = opts.permissionMode;
         this.model = opts.model;
         this.modelReasoningEffort = opts.modelReasoningEffort;
@@ -88,6 +90,9 @@ export class AgentSessionBase<Mode> {
 
     onModeChange = (mode: 'local' | 'remote') => {
         this.mode = mode;
+        if (mode === 'remote') {
+            this.hasEnteredRemoteMode = true;
+        }
         this.client.keepAlive(this.thinking, mode, this.getKeepAliveRuntime());
         const permissionLabel = this.permissionMode ?? 'unset';
         const modelLabel = this.model === undefined ? 'unset' : (this.model ?? 'auto');

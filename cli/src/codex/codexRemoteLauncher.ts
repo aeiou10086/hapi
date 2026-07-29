@@ -19,6 +19,7 @@ import { buildThreadStartParams, buildTurnStartParams } from './utils/appServerC
 import { normalizeCodexGoalState } from './utils/codexGoalState';
 import { shouldIgnoreTerminalEvent } from './utils/terminalEventGuard';
 import { expandCodexCustomSlashCommand, parseCodexBuiltinSlashCommand, type CodexBuiltinSlashCommand } from './utils/slashCommand';
+import { claimTerminalForeground } from '@/ui/terminalJobControl';
 import {
     RemoteLauncherBase,
     type RemoteLauncherDisplayContext,
@@ -883,6 +884,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 experimentalApi: true
             }
         });
+        claimTerminalForeground();
 
         let hasThread = false;
         let pending: QueuedMessage | null = null;
@@ -954,6 +956,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             this.currentThreadId = threadId;
             session.onSessionFound(threadId);
             hasThread = true;
+            claimTerminalForeground();
             await syncCodexGoalStateForThread(threadId);
             return threadId;
         };

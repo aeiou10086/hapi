@@ -57,7 +57,7 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
         queue: session.queue,
         rpcHandlerManager: session.client.rpcHandlerManager,
         startedBy: session.startedBy,
-        startingMode: session.startingMode,
+        startingMode: session.hasEnteredRemoteMode ? 'remote' : session.startingMode,
         launch: async (abortSignal) => {
             await codexLocal({
                 path: session.path,

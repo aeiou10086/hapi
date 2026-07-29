@@ -27,16 +27,20 @@ const harness = vi.hoisted(() => ({
     turnNotifications: [] as Array<{ method: string; params: unknown }>,
     deferTurnCompletion: false,
     deferredTurnCompletions: [] as Array<() => void>,
-    nextTurnNumber: 0
+    nextTurnNumber: 0,
+    lifecycleEvents: [] as string[]
 }));
 
 vi.mock('./codexAppServerClient', () => {
     class MockCodexAppServerClient {
         private notificationHandler: ((method: string, params: unknown) => void) | null = null;
 
-        async connect(): Promise<void> {}
+        async connect(): Promise<void> {
+            harness.lifecycleEvents.push('app-server-connect');
+        }
 
         async initialize(params: unknown): Promise<{ protocolVersion: number }> {
+            harness.lifecycleEvents.push('app-server-initialize');
             harness.initializeCalls.push(params);
             return { protocolVersion: 1 };
         }
@@ -50,11 +54,13 @@ vi.mock('./codexAppServerClient', () => {
         }
 
         async startThread(params: unknown): Promise<{ thread: { id: string }; model: string }> {
+            harness.lifecycleEvents.push('app-server-start-thread');
             harness.startThreadCalls.push(params);
             return { thread: { id: 'thread-anonymous' }, model: 'gpt-5.4' };
         }
 
         async resumeThread(): Promise<{ thread: { id: string }; model: string }> {
+            harness.lifecycleEvents.push('app-server-resume-thread');
             return { thread: { id: 'thread-anonymous' }, model: 'gpt-5.4' };
         }
 
@@ -160,6 +166,18 @@ vi.mock('./codexAppServerClient', () => {
 
     return { CodexAppServerClient: MockCodexAppServerClient };
 });
+
+vi.mock('@/ui/terminalJobControl', () => ({
+    claimTerminalForeground: () => {
+        harness.lifecycleEvents.push('claim-terminal-foreground');
+    },
+    suspendTerminalJobControlStops: () => {
+        harness.lifecycleEvents.push('suspend-terminal-job-control-stops');
+        return () => {
+            harness.lifecycleEvents.push('resume-terminal-job-control-stops');
+        };
+    }
+}));
 
 vi.mock('./utils/buildHapiMcpBridge', () => ({
     buildHapiMcpBridge: async () => ({
@@ -327,6 +345,7 @@ describe('codexRemoteLauncher', () => {
         harness.deferTurnCompletion = false;
         harness.deferredTurnCompletions = [];
         harness.nextTurnNumber = 0;
+        harness.lifecycleEvents = [];
     });
 
     it('finishes a turn and emits ready when task lifecycle events omit turn_id', async () => {
@@ -389,6 +408,22 @@ describe('codexRemoteLauncher', () => {
             approvalPolicy: 'never',
             sandboxPolicy: { type: 'dangerFullAccess' }
         });
+    });
+
+    it('reclaims terminal foreground after app-server initialization and thread startup', async () => {
+        const { session } = createSessionStub();
+
+        await codexRemoteLauncher(session as never);
+
+        const connectIndex = harness.lifecycleEvents.indexOf('app-server-connect');
+        const initializeIndex = harness.lifecycleEvents.indexOf('app-server-initialize');
+        const startThreadIndex = harness.lifecycleEvents.indexOf('app-server-start-thread');
+        const claimIndexes = harness.lifecycleEvents
+            .map((event, index) => event === 'claim-terminal-foreground' ? index : -1)
+            .filter((index) => index >= 0);
+
+        expect(claimIndexes.some((index) => index > connectIndex && index > initializeIndex)).toBe(true);
+        expect(claimIndexes.some((index) => index > startThreadIndex)).toBe(true);
     });
 
     it('syncs current app-server goal into session runtime state', async () => {

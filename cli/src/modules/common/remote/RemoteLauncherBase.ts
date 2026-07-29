@@ -2,6 +2,7 @@ import { render } from 'ink';
 import type { ReactElement } from 'react';
 import { MessageBuffer } from '@/ui/ink/messageBuffer';
 import { restoreTerminalState } from '@/ui/terminalState';
+import { claimTerminalForeground, suspendTerminalJobControlStops } from '@/ui/terminalJobControl';
 
 export type RemoteLauncherExitReason = 'switch' | 'exit';
 
@@ -116,12 +117,18 @@ export abstract class RemoteLauncherBase {
     }
 
     protected async start(handlers: RemoteLauncherTerminalHandlers): Promise<RemoteLauncherExitReason> {
+        const resumeTerminalJobControlStops = suspendTerminalJobControlStops();
+        claimTerminalForeground();
         this.setupTerminal(handlers);
         try {
             await this.runMainLoop();
         } finally {
-            await this.cleanup();
-            this.finalizeTerminal();
+            try {
+                await this.cleanup();
+                this.finalizeTerminal();
+            } finally {
+                resumeTerminalJobControlStops();
+            }
         }
 
         return this.exitReason || 'exit';

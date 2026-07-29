@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const harness = vi.hoisted(() => ({
     launches: [] as Array<Record<string, unknown>>,
+    localLauncherOptions: [] as Array<Record<string, unknown>>,
     sessionScannerCalls: [] as Array<Record<string, unknown>>,
     scannerFailureMessage: 'No Codex session found within 120000ms for cwd c:\\workspace\\project; refusing fallback.'
 }));
@@ -43,7 +44,9 @@ vi.mock('@/modules/common/launcher/BaseLocalLauncher', () => ({
             requestExit: () => {}
         };
 
-        constructor(private readonly opts: { launch: (signal: AbortSignal) => Promise<void> }) {}
+        constructor(private readonly opts: { launch: (signal: AbortSignal) => Promise<void> }) {
+            harness.localLauncherOptions.push(opts as unknown as Record<string, unknown>);
+        }
 
         async run(): Promise<'exit'> {
             await this.opts.launch(new AbortController().signal);
@@ -131,6 +134,7 @@ function createSessionStub(permissionMode: 'default' | 'read-only' | 'safe-yolo'
 describe('codexLocalLauncher', () => {
     afterEach(() => {
         harness.launches = [];
+        harness.localLauncherOptions = [];
         harness.sessionScannerCalls = [];
     });
 
@@ -218,6 +222,15 @@ describe('codexLocalLauncher', () => {
             type: 'message',
             message: `${harness.scannerFailureMessage} Keeping local Codex running; remote transcript sync may be unavailable for this launch.`
         });
+    });
+
+    it('treats local launch failures after entering remote mode as switchable', async () => {
+        const { session } = createSessionStub('default');
+        session.hasEnteredRemoteMode = true;
+
+        await codexLocalLauncher(session as never);
+
+        expect(harness.localLauncherOptions[0]?.startingMode).toBe('remote');
     });
 
     it('updates thinking state from local Codex transcript events', async () => {

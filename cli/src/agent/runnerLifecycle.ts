@@ -96,6 +96,14 @@ export function createRunnerLifecycle(options: RunnerLifecycleOptions): RunnerLi
         archiveReason = 'Session crashed'
     }
 
+    const isIgnorableTerminalReadInterruption = (error: unknown): boolean => {
+        if (!error || typeof error !== 'object') {
+            return false
+        }
+        const candidate = error as { code?: unknown; syscall?: unknown }
+        return candidate.code === 'EINTR' && candidate.syscall === 'read'
+    }
+
     const registerProcessHandlers = () => {
         process.on('SIGTERM', () => {
             void cleanupAndExit()
@@ -106,11 +114,19 @@ export function createRunnerLifecycle(options: RunnerLifecycleOptions): RunnerLi
         })
 
         process.on('uncaughtException', (error) => {
+            if (isIgnorableTerminalReadInterruption(error)) {
+                logger.debug(`${logPrefix} Ignored terminal read interruption`, error)
+                return
+            }
             markCrash(error)
             void cleanupAndExit(1)
         })
 
         process.on('unhandledRejection', (reason) => {
+            if (isIgnorableTerminalReadInterruption(reason)) {
+                logger.debug(`${logPrefix} Ignored terminal read interruption`, reason)
+                return
+            }
             markCrash(reason)
             void cleanupAndExit(1)
         })
