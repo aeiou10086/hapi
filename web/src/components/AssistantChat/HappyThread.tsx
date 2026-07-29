@@ -9,6 +9,9 @@ import { HappySystemMessage } from '@/components/AssistantChat/messages/SystemMe
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
 import { useTranslation } from '@/lib/use-translation'
+import { getScrollFollowDecision } from './scrollFollow'
+
+const USER_SCROLL_AWAY_SUPPRESSION_MS = 1_200
 
 function NewMessagesIndicator(props: { count: number; onClick: () => void }) {
     const { t } = useTranslation()
@@ -108,6 +111,7 @@ export function HappyThread(props: {
     const onFlushPendingRef = useRef(props.onFlushPending)
     const forceScrollTokenRef = useRef(props.forceScrollToken)
     const pendingForceScrollRef = useRef<{ token: number; messagesVersion: number } | null>(null)
+    const suppressAutoScrollUntilRef = useRef(0)
     // The library's threadViewportStore — captured by ViewportStoreCapture
     // (a no-op child rendered inside ThreadPrimitive.Viewport). We mirror our
     // "user has scrolled up" decision into the library's `isAtBottom` so its
@@ -155,6 +159,15 @@ export function HappyThread(props: {
         viewportStoreRef.current?.setState({ isAtBottom: false })
     }, [])
 
+    const markUserScrollAwayIntent = useCallback(() => {
+        suppressAutoScrollUntilRef.current = Date.now() + USER_SCROLL_AWAY_SUPPRESSION_MS
+        disableAutoScroll()
+        if (atBottomRef.current) {
+            atBottomRef.current = false
+            onAtBottomChangeRef.current(false)
+        }
+    }, [disableAutoScroll])
+
     // Track scroll position to toggle autoScroll (stable listener using refs)
     useEffect(() => {
         const viewport = viewportRef.current
@@ -166,27 +179,36 @@ export function HappyThread(props: {
 
         const handleScroll = () => {
             const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
-            const isNearBottom = distanceFromBottom < THRESHOLD_PX
             const scrolledUp = viewport.scrollTop < lastScrollTop
             lastScrollTop = viewport.scrollTop
 
             if (scrolledUp && distanceFromBottom > 1) {
+                suppressAutoScrollUntilRef.current = Date.now() + USER_SCROLL_AWAY_SUPPRESSION_MS
+            }
+
+            const decision = getScrollFollowDecision({
+                distanceFromBottom,
+                thresholdPx: THRESHOLD_PX,
+                scrolledUp,
+                autoScrollEnabled: autoScrollEnabledRef.current,
+                now: Date.now(),
+                suppressAutoScrollUntil: suppressAutoScrollUntilRef.current,
+            })
+
+            if (decision.autoScroll === 'disabled') {
                 // Disable following immediately on upward intent, even inside
                 // the "near bottom" threshold. Otherwise streaming resizes can
                 // keep snapping back and make history scrolling feel sticky.
                 disableAutoScroll()
-            } else if (isNearBottom) {
+            } else if (decision.autoScroll === 'enabled') {
                 enableAutoScroll()
                 viewportStoreRef.current?.setState({ isAtBottom: true })
-            } else if (autoScrollEnabledRef.current) {
-                autoScrollEnabledRef.current = false
-                setAutoScrollEnabled(false)
             }
 
-            if (isNearBottom !== atBottomRef.current) {
-                atBottomRef.current = isNearBottom
-                onAtBottomChangeRef.current(isNearBottom)
-                if (isNearBottom) {
+            if (decision.atBottom !== atBottomRef.current) {
+                atBottomRef.current = decision.atBottom
+                onAtBottomChangeRef.current(decision.atBottom)
+                if (decision.atBottom) {
                     onFlushPendingRef.current()
                 }
             }
@@ -194,7 +216,7 @@ export function HappyThread(props: {
 
         const handleWheel = (event: WheelEvent) => {
             if (event.deltaY < 0) {
-                disableAutoScroll()
+                markUserScrollAwayIntent()
             }
         }
 
@@ -205,7 +227,7 @@ export function HappyThread(props: {
         const handleTouchMove = (event: TouchEvent) => {
             const nextY = event.touches[0]?.clientY ?? null
             if (lastTouchY !== null && nextY !== null && nextY > lastTouchY) {
-                disableAutoScroll()
+                markUserScrollAwayIntent()
             }
             lastTouchY = nextY
         }
@@ -220,7 +242,7 @@ export function HappyThread(props: {
             viewport.removeEventListener('touchstart', handleTouchStart)
             viewport.removeEventListener('touchmove', handleTouchMove)
         }
-    }, [disableAutoScroll, enableAutoScroll]) // Stable: reads changing values from refs
+    }, [disableAutoScroll, enableAutoScroll, markUserScrollAwayIntent]) // Stable: reads changing values from refs
 
     // Scroll to bottom handler for the indicator button
     const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
@@ -228,6 +250,7 @@ export function HappyThread(props: {
         if (viewport) {
             viewport.scrollTo({ top: viewport.scrollHeight, behavior })
         }
+        suppressAutoScrollUntilRef.current = 0
         enableAutoScroll()
         viewportStoreRef.current?.setState({ isAtBottom: true })
         if (!atBottomRef.current) {
@@ -241,6 +264,7 @@ export function HappyThread(props: {
     useEffect(() => {
         autoScrollEnabledRef.current = true
         setAutoScrollEnabled(true)
+        suppressAutoScrollUntilRef.current = 0
         viewportStoreRef.current?.setState({ isAtBottom: true })
         atBottomRef.current = true
         onAtBottomChangeRef.current(true)
