@@ -67,34 +67,14 @@ function AppInner() {
             event.preventDefault()
         }
 
-        const onWheel = (event: WheelEvent) => {
-            if (event.ctrlKey) {
-                event.preventDefault()
-            }
-        }
-
-        const onKeyDown = (event: KeyboardEvent) => {
-            const modifier = event.ctrlKey || event.metaKey
-            if (!modifier) return
-            if (event.key === '+' || event.key === '-' || event.key === '=' || event.key === '0') {
-                event.preventDefault()
-            }
-        }
-
         document.addEventListener('gesturestart', preventDefault as EventListener, { passive: false })
         document.addEventListener('gesturechange', preventDefault as EventListener, { passive: false })
         document.addEventListener('gestureend', preventDefault as EventListener, { passive: false })
-
-        window.addEventListener('wheel', onWheel, { passive: false })
-        window.addEventListener('keydown', onKeyDown)
 
         return () => {
             document.removeEventListener('gesturestart', preventDefault as EventListener)
             document.removeEventListener('gesturechange', preventDefault as EventListener)
             document.removeEventListener('gestureend', preventDefault as EventListener)
-
-            window.removeEventListener('wheel', onWheel)
-            window.removeEventListener('keydown', onKeyDown)
         }
     }, [])
 
