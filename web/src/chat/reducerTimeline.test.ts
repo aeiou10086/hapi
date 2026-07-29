@@ -212,6 +212,38 @@ describe('reduceTimeline', () => {
         })
     })
 
+    it('infers an orphan Codex shell result as a CodexBash tool block', () => {
+        const msg: TracedMessage = {
+            id: 'msg-shell-result',
+            localId: null,
+            createdAt: 1_700_000_000_000,
+            role: 'agent',
+            isSidechain: false,
+            content: [{
+                type: 'tool-result',
+                tool_use_id: 'call-shell',
+                content: 'Chunk ID: abc123\nWall time: 0.1234 seconds\nProcess exited with code 0\nOutput:\nhello',
+                is_error: false,
+                uuid: 'result-uuid',
+                parentUUID: null
+            }]
+        } as TracedMessage
+
+        const { blocks } = reduceTimeline([msg], makeContext())
+
+        expect(blocks).toHaveLength(1)
+        expect(blocks[0]).toMatchObject({
+            kind: 'tool-call',
+            tool: {
+                id: 'call-shell',
+                name: 'CodexBash',
+                input: {},
+                result: expect.stringContaining('Process exited with code 0'),
+                state: 'completed'
+            }
+        })
+    })
+
     it('extracts task-notification summary as event from sidechain block', () => {
         const msg: TracedMessage = {
             id: 'msg-notif',

@@ -8,7 +8,44 @@ function inferOrphanToolResult(content: unknown): { name: string; input: unknown
     if (content === 'Plan updated') {
         return { name: 'update_plan', input: {} }
     }
+
+    const codexShellInput = inferCodexShellInput(content)
+    if (codexShellInput) {
+        return { name: 'CodexBash', input: codexShellInput }
+    }
+
     return null
+}
+
+function inferCodexShellInput(content: unknown): Record<string, unknown> | null {
+    if (content && typeof content === 'object') {
+        const record = content as Record<string, unknown>
+        const command = typeof record.command === 'string'
+            ? record.command
+            : typeof record.cmd === 'string'
+                ? record.cmd
+                : null
+        if (command) {
+            return {
+                command,
+                ...(typeof record.cwd === 'string' ? { cwd: record.cwd } : {}),
+                ...(typeof record.exit_code === 'number' ? { exit_code: record.exit_code } : {}),
+                ...(typeof record.status === 'string' ? { status: record.status } : {})
+            }
+        }
+    }
+
+    if (typeof content !== 'string') {
+        return null
+    }
+
+    const hasTiming = /(?:^|\n)Wall time: \d+(?:\.\d+)? seconds(?:\n|$)/.test(content)
+    const hasExit = /(?:^|\n)(?:Process exited with code|Exit code:) \d+(?:\n|$)/.test(content)
+    if (!hasTiming || !hasExit) {
+        return null
+    }
+
+    return {}
 }
 
 export function reduceTimeline(
