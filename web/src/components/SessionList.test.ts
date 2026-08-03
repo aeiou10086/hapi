@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@/types/api'
-import { deduplicateSessionsByAgentId } from './SessionList'
+import { deduplicateSessionsByAgentId, getDirectoryBulkSessionIds } from './SessionList'
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
@@ -78,5 +78,33 @@ describe('deduplicateSessionsByAgentId', () => {
         const result = deduplicateSessionsByAgentId(sessions)
         expect(result).toHaveLength(2)
         expect(result.map(s => s.id).sort()).toEqual(['b', 'd'])
+    })
+})
+
+describe('getDirectoryBulkSessionIds', () => {
+    it('is exposed for directory bulk actions', async () => {
+        const sessionListModule = await import('./SessionList') as Record<string, unknown>
+
+        expect(sessionListModule.getDirectoryBulkSessionIds).toBeTypeOf('function')
+    })
+
+    it('selects only active sessions for archive', () => {
+        const sessions = [
+            makeSession({ id: 'active-a', active: true }),
+            makeSession({ id: 'archived' }),
+            makeSession({ id: 'active-b', active: true })
+        ]
+
+        expect(getDirectoryBulkSessionIds(sessions, 'archive')).toEqual(['active-a', 'active-b'])
+    })
+
+    it('selects only archived sessions for delete', () => {
+        const sessions = [
+            makeSession({ id: 'active', active: true }),
+            makeSession({ id: 'archived-a' }),
+            makeSession({ id: 'archived-b' })
+        ]
+
+        expect(getDirectoryBulkSessionIds(sessions, 'delete')).toEqual(['archived-a', 'archived-b'])
     })
 })

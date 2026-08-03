@@ -64,6 +64,13 @@ export default {
   'session.action.delete': '删除',
   'session.action.copy': '复制',
 
+  // Directory actions
+  'directory.action.heading': '目录操作',
+  'directory.action.archive': '归档所有活跃任务',
+  'directory.action.delete': '删除所有归档任务',
+  'directory.action.unavailable': '没有可操作的匹配会话。',
+  'directory.action.failed': '{n} 个会话操作失败，请重试。',
+
   // Dialogs
   'dialog.rename.title': '重命名会话',
   'dialog.rename.placeholder': '会话名称',
@@ -81,6 +88,16 @@ export default {
   'dialog.delete.confirm': '删除',
   'dialog.delete.confirming': '删除中…',
   'dialog.error.default': '操作失败，请重试。',
+  'directory.dialog.archive.title': '归档所有活跃任务',
+  'directory.dialog.archive.description.one': '确定归档目录 "{directory}" 中的 1 个活跃任务吗？这将断开该会话。',
+  'directory.dialog.archive.description': '确定归档目录 "{directory}" 中的 {n} 个活跃任务吗？这将断开所有活跃会话。',
+  'directory.dialog.archive.confirm': '全部归档',
+  'directory.dialog.archive.confirming': '归档中…',
+  'directory.dialog.delete.title': '删除所有归档任务',
+  'directory.dialog.delete.description.one': '确定删除目录 "{directory}" 中的 1 个归档任务吗？此操作无法撤销。',
+  'directory.dialog.delete.description': '确定删除目录 "{directory}" 中的 {n} 个归档任务吗？此操作无法撤销。',
+  'directory.dialog.delete.confirm': '全部删除',
+  'directory.dialog.delete.confirming': '删除中…',
 
   // Common buttons
   'button.cancel': '取消',

@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import type { SessionSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
+import { DirectoryActionMenu } from '@/components/DirectoryActionMenu'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { CopyIcon, CheckIcon } from '@/components/icons'
 import { useTranslation } from '@/lib/use-translation'
+import { queryKeys } from '@/lib/query-keys'
+import { clearMessageWindow } from '@/lib/message-window-store'
 
 type SessionGroup = {
     key: string
@@ -38,6 +42,22 @@ function getGroupDisplayName(directory: string): string {
 }
 
 export const UNKNOWN_MACHINE_ID = '__unknown__'
+
+function getSessionGroupKey(session: SessionSummary): string {
+    const path = session.metadata?.worktree?.basePath ?? session.metadata?.path ?? 'Other'
+    const machineId = session.metadata?.machineId ?? null
+    return `${machineId ?? UNKNOWN_MACHINE_ID}::${path}`
+}
+
+export function getDirectoryBulkSessionIds(
+    sessions: SessionSummary[],
+    action: 'archive' | 'delete'
+): string[] {
+    const targetIsActive = action === 'archive'
+    return sessions
+        .filter(session => session.active === targetIsActive)
+        .map(session => session.id)
+}
 
 export function deduplicateSessionsByAgentId(sessions: SessionSummary[], selectedSessionId?: string | null): SessionSummary[] {
     const byAgentId = new Map<string, SessionSummary[]>()
@@ -78,7 +98,7 @@ function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
     sessions.forEach(session => {
         const path = session.metadata?.worktree?.basePath ?? session.metadata?.path ?? 'Other'
         const machineId = session.metadata?.machineId ?? null
-        const key = `${machineId ?? UNKNOWN_MACHINE_ID}::${path}`
+        const key = getSessionGroupKey(session)
         if (!groups.has(key)) {
             groups.set(key, {
                 directory: path,
@@ -484,6 +504,7 @@ export function SessionList(props: {
     selectedSessionId?: string | null
 }) {
     const { t } = useTranslation()
+    const queryClient = useQueryClient()
     const { renderHeader = true, api, selectedSessionId, machineLabelsById = {} } = props
     const groups = useMemo(
         () => groupSessionsByDirectory(deduplicateSessionsByAgentId(props.sessions, selectedSessionId)),
@@ -492,6 +513,34 @@ export function SessionList(props: {
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
     )
+    const [directoryMenu, setDirectoryMenu] = useState<{
+        groupKey: string
+        anchorPoint: { x: number; y: number }
+    } | null>(null)
+    const [directoryAction, setDirectoryAction] = useState<{
+        groupKey: string
+        action: 'archive' | 'delete'
+    } | null>(null)
+    const [isDirectoryActionPending, setIsDirectoryActionPending] = useState(false)
+
+    const getAllSessionsForGroup = (groupKey: string): SessionSummary[] => (
+        props.sessions.filter(session => getSessionGroupKey(session) === groupKey)
+    )
+    const directoryMenuGroup = directoryMenu
+        ? groups.find(group => group.key === directoryMenu.groupKey) ?? null
+        : null
+    const directoryMenuSessions = directoryMenuGroup
+        ? getAllSessionsForGroup(directoryMenuGroup.key)
+        : []
+    const directoryActionGroup = directoryAction
+        ? groups.find(group => group.key === directoryAction.groupKey) ?? null
+        : null
+    const directoryActionSessions = directoryActionGroup
+        ? getAllSessionsForGroup(directoryActionGroup.key)
+        : []
+    const directoryActionSessionIds = directoryAction
+        ? getDirectoryBulkSessionIds(directoryActionSessions, directoryAction.action)
+        : []
     const isGroupCollapsed = (group: SessionGroup): boolean => {
         const override = collapseOverrides.get(group.key)
         if (override !== undefined) return override
@@ -590,6 +639,56 @@ export function SessionList(props: {
         })
     }, [groups])
 
+    const handleDirectoryContextMenu = (event: React.MouseEvent, group: SessionGroup) => {
+        event.preventDefault()
+        event.stopPropagation()
+        setDirectoryMenu({
+            groupKey: group.key,
+            anchorPoint: { x: event.clientX, y: event.clientY }
+        })
+    }
+
+    const openDirectoryAction = (groupKey: string, action: 'archive' | 'delete') => {
+        setDirectoryMenu(null)
+        setDirectoryAction({ groupKey, action })
+    }
+
+    const runDirectoryAction = async () => {
+        if (!api || !directoryAction || directoryActionSessionIds.length === 0) {
+            throw new Error(t('directory.action.unavailable'))
+        }
+
+        setIsDirectoryActionPending(true)
+        try {
+            const results = await Promise.allSettled(
+                directoryActionSessionIds.map(sessionId => (
+                    directoryAction.action === 'archive'
+                        ? api.archiveSession(sessionId)
+                        : api.deleteSession(sessionId)
+                ))
+            )
+
+            results.forEach((result, index) => {
+                if (result.status !== 'fulfilled') return
+                const sessionId = directoryActionSessionIds[index]
+                if (directoryAction.action === 'archive') {
+                    void queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) })
+                } else {
+                    queryClient.removeQueries({ queryKey: queryKeys.session(sessionId) })
+                    clearMessageWindow(sessionId)
+                }
+            })
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
+
+            const failedCount = results.filter(result => result.status === 'rejected').length
+            if (failedCount > 0) {
+                throw new Error(t('directory.action.failed', { n: failedCount }))
+            }
+        } finally {
+            setIsDirectoryActionPending(false)
+        }
+    }
+
     return (
         <div className="mx-auto w-full max-w-content flex flex-col">
             {renderHeader ? (
@@ -636,6 +735,7 @@ export function SessionList(props: {
                                                 <div
                                                     className="group/project sticky top-0 z-10 flex items-center gap-2 px-1 py-1.5 text-left rounded-lg transition-colors hover:bg-[var(--app-subtle-bg)] cursor-pointer min-w-0 w-full select-none"
                                                     onClick={() => toggleGroup(group.key, isCollapsed)}
+                                                    onContextMenu={(event) => handleDirectoryContextMenu(event, group)}
                                                     title={group.directory}
                                                 >
                                                     <ChevronIcon className="h-3.5 w-3.5 text-[var(--app-hint)] shrink-0" collapsed={isCollapsed} />
@@ -675,6 +775,53 @@ export function SessionList(props: {
                     )
                 })}
             </div>
+
+            <DirectoryActionMenu
+                isOpen={directoryMenuGroup !== null}
+                onClose={() => setDirectoryMenu(null)}
+                onArchive={() => directoryMenuGroup && openDirectoryAction(directoryMenuGroup.key, 'archive')}
+                onDelete={() => directoryMenuGroup && openDirectoryAction(directoryMenuGroup.key, 'delete')}
+                activeCount={getDirectoryBulkSessionIds(directoryMenuSessions, 'archive').length}
+                archivedCount={getDirectoryBulkSessionIds(directoryMenuSessions, 'delete').length}
+                disabled={!api}
+                anchorPoint={directoryMenu?.anchorPoint ?? { x: 0, y: 0 }}
+            />
+
+            <ConfirmDialog
+                isOpen={directoryActionGroup !== null && directoryAction?.action === 'archive'}
+                onClose={() => setDirectoryAction(null)}
+                title={t('directory.dialog.archive.title')}
+                description={t(
+                    directoryActionSessionIds.length === 1
+                        ? 'directory.dialog.archive.description.one'
+                        : 'directory.dialog.archive.description', {
+                    n: directoryActionSessionIds.length,
+                    directory: directoryActionGroup?.directory ?? ''
+                })}
+                confirmLabel={t('directory.dialog.archive.confirm')}
+                confirmingLabel={t('directory.dialog.archive.confirming')}
+                onConfirm={runDirectoryAction}
+                isPending={isDirectoryActionPending}
+                destructive
+            />
+
+            <ConfirmDialog
+                isOpen={directoryActionGroup !== null && directoryAction?.action === 'delete'}
+                onClose={() => setDirectoryAction(null)}
+                title={t('directory.dialog.delete.title')}
+                description={t(
+                    directoryActionSessionIds.length === 1
+                        ? 'directory.dialog.delete.description.one'
+                        : 'directory.dialog.delete.description', {
+                    n: directoryActionSessionIds.length,
+                    directory: directoryActionGroup?.directory ?? ''
+                })}
+                confirmLabel={t('directory.dialog.delete.confirm')}
+                confirmingLabel={t('directory.dialog.delete.confirming')}
+                onConfirm={runDirectoryAction}
+                isPending={isDirectoryActionPending}
+                destructive
+            />
         </div>
     )
 }

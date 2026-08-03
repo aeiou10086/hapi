@@ -64,6 +64,13 @@ export default {
   'session.action.delete': 'Delete',
   'session.action.copy': 'Copy',
 
+  // Directory actions
+  'directory.action.heading': 'Directory actions',
+  'directory.action.archive': 'Archive active sessions',
+  'directory.action.delete': 'Delete archived sessions',
+  'directory.action.unavailable': 'No matching sessions are available.',
+  'directory.action.failed': '{n} session operations failed. Please try again.',
+
   // Dialogs
   'dialog.rename.title': 'Rename Session',
   'dialog.rename.placeholder': 'Session name',
@@ -79,6 +86,16 @@ export default {
   'dialog.delete.confirm': 'Delete',
   'dialog.delete.confirming': 'Deleting…',
   'dialog.error.default': 'Operation failed. Please try again.',
+  'directory.dialog.archive.title': 'Archive active sessions',
+  'directory.dialog.archive.description.one': 'Archive 1 active session in "{directory}"? This will disconnect the active session.',
+  'directory.dialog.archive.description': 'Archive {n} active sessions in "{directory}"? This will disconnect all active sessions.',
+  'directory.dialog.archive.confirm': 'Archive all',
+  'directory.dialog.archive.confirming': 'Archiving…',
+  'directory.dialog.delete.title': 'Delete archived sessions',
+  'directory.dialog.delete.description.one': 'Delete 1 archived session in "{directory}"? This action cannot be undone.',
+  'directory.dialog.delete.description': 'Delete {n} archived sessions in "{directory}"? This action cannot be undone.',
+  'directory.dialog.delete.confirm': 'Delete all',
+  'directory.dialog.delete.confirming': 'Deleting…',
 
   // Common buttons
   'button.cancel': 'Cancel',
