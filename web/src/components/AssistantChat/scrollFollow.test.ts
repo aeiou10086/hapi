@@ -6,24 +6,32 @@ describe('getScrollFollowDecision', () => {
         const decision = getScrollFollowDecision({
             distanceFromBottom: 24,
             thresholdPx: 120,
-            scrolledUp: false,
+            scrolledUp: true,
             autoScrollEnabled: false,
-            now: 1_000,
-            suppressAutoScrollUntil: 1_500,
         })
 
         expect(decision.autoScroll).toBe('disabled')
         expect(decision.atBottom).toBe(false)
     })
 
-    it('re-enables auto-scroll near the bottom after the user scroll-away window expires', () => {
+    it('keeps auto-scroll disabled after the user scroll-away window expires', () => {
         const decision = getScrollFollowDecision({
             distanceFromBottom: 24,
             thresholdPx: 120,
             scrolledUp: false,
             autoScrollEnabled: false,
-            now: 2_000,
-            suppressAutoScrollUntil: 1_500,
+        })
+
+        expect(decision.autoScroll).toBe('disabled')
+        expect(decision.atBottom).toBe(false)
+    })
+
+    it('re-enables auto-scroll when the user reaches the actual bottom', () => {
+        const decision = getScrollFollowDecision({
+            distanceFromBottom: 0,
+            thresholdPx: 120,
+            scrolledUp: false,
+            autoScrollEnabled: false,
         })
 
         expect(decision.autoScroll).toBe('enabled')
@@ -36,8 +44,6 @@ describe('getScrollFollowDecision', () => {
             thresholdPx: 120,
             scrolledUp: true,
             autoScrollEnabled: true,
-            now: 2_000,
-            suppressAutoScrollUntil: 0,
         })
 
         expect(decision.autoScroll).toBe('disabled')

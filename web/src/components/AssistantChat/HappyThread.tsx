@@ -11,8 +11,6 @@ import { Spinner } from '@/components/Spinner'
 import { useTranslation } from '@/lib/use-translation'
 import { getScrollFollowDecision } from './scrollFollow'
 
-const USER_SCROLL_AWAY_SUPPRESSION_MS = 1_200
-
 function NewMessagesIndicator(props: { count: number; onClick: () => void }) {
     const { t } = useTranslation()
     if (props.count === 0) {
@@ -111,7 +109,6 @@ export function HappyThread(props: {
     const onFlushPendingRef = useRef(props.onFlushPending)
     const forceScrollTokenRef = useRef(props.forceScrollToken)
     const pendingForceScrollRef = useRef<{ token: number; messagesVersion: number } | null>(null)
-    const suppressAutoScrollUntilRef = useRef(0)
     // The library's threadViewportStore — captured by ViewportStoreCapture
     // (a no-op child rendered inside ThreadPrimitive.Viewport). We mirror our
     // "user has scrolled up" decision into the library's `isAtBottom` so its
@@ -160,7 +157,6 @@ export function HappyThread(props: {
     }, [])
 
     const markUserScrollAwayIntent = useCallback(() => {
-        suppressAutoScrollUntilRef.current = Date.now() + USER_SCROLL_AWAY_SUPPRESSION_MS
         disableAutoScroll()
         if (atBottomRef.current) {
             atBottomRef.current = false
@@ -182,17 +178,11 @@ export function HappyThread(props: {
             const scrolledUp = viewport.scrollTop < lastScrollTop
             lastScrollTop = viewport.scrollTop
 
-            if (scrolledUp && distanceFromBottom > 1) {
-                suppressAutoScrollUntilRef.current = Date.now() + USER_SCROLL_AWAY_SUPPRESSION_MS
-            }
-
             const decision = getScrollFollowDecision({
                 distanceFromBottom,
                 thresholdPx: THRESHOLD_PX,
                 scrolledUp,
                 autoScrollEnabled: autoScrollEnabledRef.current,
-                now: Date.now(),
-                suppressAutoScrollUntil: suppressAutoScrollUntilRef.current,
             })
 
             if (decision.autoScroll === 'disabled') {
@@ -250,7 +240,6 @@ export function HappyThread(props: {
         if (viewport) {
             viewport.scrollTo({ top: viewport.scrollHeight, behavior })
         }
-        suppressAutoScrollUntilRef.current = 0
         enableAutoScroll()
         viewportStoreRef.current?.setState({ isAtBottom: true })
         if (!atBottomRef.current) {
@@ -264,7 +253,6 @@ export function HappyThread(props: {
     useEffect(() => {
         autoScrollEnabledRef.current = true
         setAutoScrollEnabled(true)
-        suppressAutoScrollUntilRef.current = 0
         viewportStoreRef.current?.setState({ isAtBottom: true })
         atBottomRef.current = true
         onAtBottomChangeRef.current(true)
